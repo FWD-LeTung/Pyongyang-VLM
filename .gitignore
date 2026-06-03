@@ -1,2 +1,7 @@
 .venv
 .env
+.agents
+.codex
+.pytest_cache
+__pycache__
+data/CUHK-PEDES

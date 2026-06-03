@@ -1,0 +1,52 @@
+[2026-06-03 12:40:17,107] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0001 seconds
+[2026-06-03 12:40:17,110] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 12:40:17,113] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0033 seconds
+[2026-06-03 12:40:27,821] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0000 seconds
+[2026-06-03 12:40:27,823] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 12:40:27,823] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0003 seconds
+[2026-06-03 12:46:25,970] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0000 seconds
+[2026-06-03 12:46:25,972] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 12:46:25,973] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0004 seconds
+[2026-06-03 12:46:25,975] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 12:46:25,975] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0003 seconds
+[2026-06-03 12:46:37,418] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0000 seconds
+[2026-06-03 12:46:37,420] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 12:46:37,420] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0003 seconds
+[2026-06-03 12:46:37,422] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 12:46:37,422] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0003 seconds
+[2026-06-03 12:55:27,847] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0000 seconds
+[2026-06-03 12:55:27,849] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 12:55:27,849] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0004 seconds
+[2026-06-03 12:55:27,851] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 12:55:27,852] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0006 seconds
+[2026-06-03 14:00:13,805] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0004 seconds
+[2026-06-03 14:00:48,932] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0001 seconds
+[2026-06-03 14:00:57,595] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 14:00:57,599] [ERROR] [src.query_understanding.llm_parser] - Both Cloud and Edge LLMs failed.
+[2026-06-03 14:00:57,599] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.1792 seconds
+[2026-06-03 14:01:08,761] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0000 seconds
+[2026-06-03 14:01:08,763] [WARNING] [src.query_understanding.llm_parser] - Vertex AI failed. Falling back to local model at Edge...
+[2026-06-03 14:01:08,763] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0003 seconds
+[2026-06-03 14:01:08,765] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:01:08,765] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0004 seconds
+[2026-06-03 14:05:00,584] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:05:00,584] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 6.5320 seconds
+[2026-06-03 14:10:05,949] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:10:05,950] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 10.6192 seconds
+[2026-06-03 14:16:40,909] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:16:40,909] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 2.9118 seconds
+[2026-06-03 14:17:05,992] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:17:05,992] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 9.3250 seconds
+[2026-06-03 14:17:18,384] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0001 seconds
+[2026-06-03 14:19:04,695] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0001 seconds
+[2026-06-03 14:19:42,079] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:19:42,079] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 21.7131 seconds
+[2026-06-03 14:36:26,561] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 0.0008 seconds
+[2026-06-03 14:38:55,286] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:38:55,287] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 5.1681 seconds
+[2026-06-03 14:41:38,666] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:41:38,667] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 13.0089 seconds
+[2026-06-03 14:46:52,089] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:46:52,089] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 11.1567 seconds
+[2026-06-03 14:50:53,287] [INFO] [src.query_understanding.llm_parser] - Query understanding completed with Google Gen AI on Vertex AI.
+[2026-06-03 14:50:53,288] [INFO] [src.query_understanding.llm_parser] - Function parse executed in 19.1052 seconds
