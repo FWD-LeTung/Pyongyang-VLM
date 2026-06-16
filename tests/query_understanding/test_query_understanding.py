@@ -103,7 +103,7 @@ def test_parser_uses_fallback_when_primary_fails() -> None:
     parser = StubParser()
     response = parser.parse("A woman in a red dress")
 
-    assert parser.calls == [QueryParser.PRIMARY_MODEL, QueryParser.FALLBACK_MODEL]
+    assert parser.calls == [parser.primary_model, QueryParser.FALLBACK_MODEL]
     assert response.metadata.original_query == "A woman in a red dress"
     assert response.metadata.language_detected == "en"
     assert response.metadata.error_code is None
@@ -149,7 +149,7 @@ def test_parser_uses_google_genai_client_schema() -> None:
     parser = QueryParser(client=client)
     response = parser.parse("A man wearing a black shirt")
 
-    assert client.models.kwargs["model"] == QueryParser.PRIMARY_MODEL
+    assert client.models.kwargs["model"] == parser.primary_model
     assert client.models.kwargs["contents"]
     assert client.models.kwargs["config"] == {
         "temperature": 0,

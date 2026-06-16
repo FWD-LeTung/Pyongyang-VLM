@@ -4,4 +4,8 @@
 .codex
 .pytest_cache
 __pycache__
-data/CUHK-PEDES
+data/CUHK-PEDES/
+data/output/
+logs/
+*.log
+weights/

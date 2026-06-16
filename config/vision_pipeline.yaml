@@ -1,0 +1,36 @@
+source:
+  mode: video
+  video_uri: data/test_videos/cctv_full.mp4
+  stream_uri: rtsp://user:password@192.168.1.10:554/stream1
+
+reader:
+  queue_size: 2
+  reconnect_interval_sec: 2.0
+  read_timeout_sec: 3.0
+  max_empty_reads: 100
+  processing_fps: 5.0
+
+detector:
+  weights_path: weights/yolov8n.pt
+  confidence_threshold: 0.35
+  classes: [0]
+  device: cpu
+  image_size: 640
+
+tracker:
+  frame_rate: 30
+  track_high_thresh: 0.5
+  track_low_thresh: 0.1
+  new_track_thresh: 0.5
+  track_buffer: 30
+  match_thresh: 0.8
+  fuse_score: true
+
+cropper:
+  output_size: [224, 224]
+  min_width: 40
+  min_height: 60
+
+buffer:
+  batch_size: 10
+  lost_timeout_sec: 1.0
