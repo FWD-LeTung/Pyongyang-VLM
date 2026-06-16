@@ -6,6 +6,6 @@
 __pycache__
 data/CUHK-PEDES/
 data/output/
+data/CUHK-PEDES.zip
 logs/
 *.log
-weights/
