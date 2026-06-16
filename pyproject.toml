@@ -6,11 +6,26 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "faiss-cpu>=1.13.2",
+    "google-genai>=2.7.0",
     "ipykernel>=7.2.0",
+    "lap>=0.5.13",
+    "openai>=2.40.0",
     "opencv-python>=4.13.0.92",
+    "peft>=0.19.1",
     "pillow>=12.2.0",
+    "prettytable>=3.17.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+    "tqdm>=4.67.3",
     "transformers>=5.5.0",
     "ultralytics>=8.4.34",
+    "yt-dlp>=2026.3.17",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
 ]
