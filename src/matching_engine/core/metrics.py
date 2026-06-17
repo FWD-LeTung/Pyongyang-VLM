@@ -91,6 +91,12 @@ class Evaluator:
             inputs = self._to_device(batch, device)
             with torch.no_grad():
                 text_feat = clip_model.get_text_features(**inputs)
+                
+                if not isinstance(text_feat, torch.Tensor):
+                    text_feat = text_feat.pooler_output
+                    if hasattr(clip_model, "text_projection") and clip_model.text_projection is not None:
+                        text_feat = clip_model.text_projection(text_feat)
+
             qids.append(labels.view(-1).cpu())
             qfeats.append(text_feat.cpu())
 
@@ -99,6 +105,11 @@ class Evaluator:
             inputs = self._to_device(batch, device)
             with torch.no_grad():
                 image_feat = clip_model.get_image_features(**inputs)
+
+                if not isinstance(image_feat, torch.Tensor):
+                    image_feat = image_feat.pooler_output
+                    if hasattr(clip_model, "visual_projection") and clip_model.visual_projection is not None:
+                        image_feat = clip_model.visual_projection(image_feat)
             gids.append(labels.view(-1).cpu())
             gfeats.append(image_feat.cpu())
 
