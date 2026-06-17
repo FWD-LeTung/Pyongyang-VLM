@@ -82,7 +82,7 @@ class Evaluator:
         """Extract text query and image gallery embeddings."""
 
         model.eval()
-        clip_model = base_clip_model(model)
+        clip_model = self._clip_core_model(model)
         device = next(model.parameters()).device
         qids, gids, qfeats, gfeats = [], [], [], []
 
@@ -90,17 +90,7 @@ class Evaluator:
             labels = batch["label"]
             inputs = self._to_device(batch, device)
             with torch.no_grad():
-                text_feat = clip_model.get_text_features(**inputs)
-                
-                if not isinstance(text_feat, torch.Tensor):
-                    if hasattr(text_feat, "text_embeds") and text_feat.text_embeds is not None:
-                        text_feat = text_feat.text_embeds
-                    elif hasattr(text_feat, "pooler_output"):
-                        text_feat = text_feat.pooler_output
-                        if hasattr(clip_model, "text_projection") and clip_model.text_projection is not None:
-                            if text_feat.shape[-1] == clip_model.text_projection.in_features:
-                                text_feat = clip_model.text_projection(text_feat)
-
+                text_feat = self._encode_text_features(clip_model, inputs)
             qids.append(labels.view(-1).cpu())
             qfeats.append(text_feat.cpu())
 
@@ -108,17 +98,7 @@ class Evaluator:
             labels = batch["label"]
             inputs = self._to_device(batch, device)
             with torch.no_grad():
-                image_feat = clip_model.get_image_features(**inputs)
-
-                if not isinstance(image_feat, torch.Tensor):
-                    if hasattr(image_feat, "image_embeds") and image_feat.image_embeds is not None:
-                        image_feat = image_feat.image_embeds
-                    elif hasattr(image_feat, "pooler_output"):
-                        image_feat = image_feat.pooler_output
-                        if hasattr(clip_model, "visual_projection") and clip_model.visual_projection is not None:
-                            if image_feat.shape[-1] == clip_model.visual_projection.in_features:
-                                image_feat = clip_model.visual_projection(image_feat)
-                                
+                image_feat = self._encode_image_features(clip_model, inputs)
             gids.append(labels.view(-1).cpu())
             gfeats.append(image_feat.cpu())
 
@@ -171,6 +151,94 @@ class Evaluator:
             for key, value in batch.items()
             if key != "label" and isinstance(value, torch.Tensor)
         }
+
+    @staticmethod
+    def _clip_core_model(model: Any) -> Any:
+        """Return the CLIP core model behind DDP or PEFT wrappers."""
+
+        while hasattr(model, "module"):
+            model = model.module
+        clip_model = base_clip_model(model)
+        peft_core = getattr(getattr(clip_model, "base_model", None), "model", None)
+        if peft_core is not None:
+            return peft_core
+        return clip_model
+
+    @staticmethod
+    def _encode_text_features(
+        clip_model: Any,
+        inputs: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Encode text inputs into projected CLIP embeddings."""
+
+        if hasattr(clip_model, "text_model") and hasattr(clip_model, "text_projection"):
+            text_inputs = {
+                key: value
+                for key, value in inputs.items()
+                if key in {"input_ids", "attention_mask", "position_ids"}
+            }
+            output = clip_model.text_model(**text_inputs, return_dict=True)
+            return Evaluator._extract_feature(
+                output,
+                embed_attr="text_embeds",
+                projection=clip_model.text_projection,
+            )
+        output = clip_model.get_text_features(**inputs)
+        return Evaluator._extract_feature(
+            output,
+            embed_attr="text_embeds",
+            projection=getattr(clip_model, "text_projection", None),
+        )
+
+    @staticmethod
+    def _encode_image_features(
+        clip_model: Any,
+        inputs: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Encode image inputs into projected CLIP embeddings."""
+
+        if hasattr(clip_model, "vision_model") and hasattr(clip_model, "visual_projection"):
+            image_inputs = {
+                key: value
+                for key, value in inputs.items()
+                if key in {"pixel_values", "interpolate_pos_encoding"}
+            }
+            output = clip_model.vision_model(**image_inputs, return_dict=True)
+            return Evaluator._extract_feature(
+                output,
+                embed_attr="image_embeds",
+                projection=clip_model.visual_projection,
+            )
+        output = clip_model.get_image_features(**inputs)
+        return Evaluator._extract_feature(
+            output,
+            embed_attr="image_embeds",
+            projection=getattr(clip_model, "visual_projection", None),
+        )
+
+    @staticmethod
+    def _extract_feature(
+        output: Any,
+        embed_attr: str,
+        projection: torch.nn.Module | None,
+    ) -> torch.Tensor:
+        """Extract a tensor feature and project pooled model outputs if needed."""
+
+        if isinstance(output, torch.Tensor):
+            return output
+        embed = getattr(output, embed_attr, None)
+        if isinstance(embed, torch.Tensor):
+            return embed
+        if isinstance(output, dict):
+            embed = output.get(embed_attr)
+            if isinstance(embed, torch.Tensor):
+                return embed
+            pooled = output.get("pooler_output")
+        else:
+            pooled = getattr(output, "pooler_output", None)
+        if not isinstance(pooled, torch.Tensor):
+            raise TypeError(f"Cannot extract {embed_attr} from {type(output).__name__}.")
+        return projection(pooled) if projection is not None else pooled
 
     @staticmethod
     def _add_metric_row(
