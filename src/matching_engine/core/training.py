@@ -56,37 +56,45 @@ def train_one_epoch(
     model: torch.nn.Module,
     train_loader: DataLoader[dict[str, torch.Tensor]],
     optimizer: torch.optim.Optimizer,
-    device: torch.device,
+    accelerator: Any,
     epoch: int,
 ) -> float:
     """Train one epoch and return mean InfoNCE loss."""
 
     model.train()
     losses: list[float] = []
-    progress = tqdm(train_loader, desc=f"epoch {epoch}", leave=False)
+    progress = tqdm(
+        train_loader,
+        desc=f"epoch {epoch}",
+        disable=not accelerator.is_main_process,
+        leave=False,
+    )
     for batch in progress:
-        inputs = to_device_inputs(batch, device)
+        inputs = to_device_inputs(batch, accelerator.device)
         optimizer.zero_grad(set_to_none=True)
-        loss = clip_infonce_loss(model, inputs)
-        loss.backward()
+        loss = clip_infonce_loss(model, inputs, accelerator)
+        accelerator.backward(loss)
         optimizer.step()
         losses.append(float(loss.detach().cpu()))
         progress.set_postfix(loss=f"{losses[-1]:.4f}")
     mean_loss = sum(losses) / max(len(losses), 1)
-    logger.info("Epoch %s train_loss=%.6f", epoch, mean_loss)
+    if accelerator.is_main_process:
+        logger.info("Epoch %s train_loss=%.6f", epoch, mean_loss)
     return mean_loss
 
 
 def clip_infonce_loss(
     model: torch.nn.Module,
     inputs: dict[str, torch.Tensor],
+    accelerator: Any = None,
 ) -> torch.Tensor:
     """Compute symmetric CLIP InfoNCE loss."""
 
     outputs = model(**inputs)
     image_features = F.normalize(outputs.image_embeds, p=2, dim=1)
     text_features = F.normalize(outputs.text_embeds, p=2, dim=1)
-    logit_scale = base_clip_model(model).logit_scale.exp()
+    unwrapped_model = accelerator.unwrap_model(model) if accelerator else model
+    logit_scale = base_clip_model(unwrapped_model).logit_scale.exp()
     logits = logit_scale * image_features @ text_features.t()
     labels = torch.arange(logits.size(0), device=logits.device)
     return (
