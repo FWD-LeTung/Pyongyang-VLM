@@ -93,9 +93,13 @@ class Evaluator:
                 text_feat = clip_model.get_text_features(**inputs)
                 
                 if not isinstance(text_feat, torch.Tensor):
-                    text_feat = text_feat.pooler_output
-                    if hasattr(clip_model, "text_projection") and clip_model.text_projection is not None:
-                        text_feat = clip_model.text_projection(text_feat)
+                    if hasattr(text_feat, "text_embeds") and text_feat.text_embeds is not None:
+                        text_feat = text_feat.text_embeds
+                    elif hasattr(text_feat, "pooler_output"):
+                        text_feat = text_feat.pooler_output
+                        if hasattr(clip_model, "text_projection") and clip_model.text_projection is not None:
+                            if text_feat.shape[-1] == clip_model.text_projection.in_features:
+                                text_feat = clip_model.text_projection(text_feat)
 
             qids.append(labels.view(-1).cpu())
             qfeats.append(text_feat.cpu())
@@ -107,9 +111,14 @@ class Evaluator:
                 image_feat = clip_model.get_image_features(**inputs)
 
                 if not isinstance(image_feat, torch.Tensor):
-                    image_feat = image_feat.pooler_output
-                    if hasattr(clip_model, "visual_projection") and clip_model.visual_projection is not None:
-                        image_feat = clip_model.visual_projection(image_feat)
+                    if hasattr(image_feat, "image_embeds") and image_feat.image_embeds is not None:
+                        image_feat = image_feat.image_embeds
+                    elif hasattr(image_feat, "pooler_output"):
+                        image_feat = image_feat.pooler_output
+                        if hasattr(clip_model, "visual_projection") and clip_model.visual_projection is not None:
+                            if image_feat.shape[-1] == clip_model.visual_projection.in_features:
+                                image_feat = clip_model.visual_projection(image_feat)
+                                
             gids.append(labels.view(-1).cpu())
             gfeats.append(image_feat.cpu())
 
