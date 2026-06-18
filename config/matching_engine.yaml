@@ -1,10 +1,48 @@
 model_name: "openai/clip-vit-base-patch16"
 
 lora:
-  r: 8
-  alpha: 16
-  dropout: 0.1
-  target_modules: ["q_proj", "v_proj"]
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - out_proj
+    # Optional MLP targets for ablation:
+    - fc1
+    - fc2
+
+trainable:
+  unfreeze_projection: true
+  unfreeze_logit_scale: true
+
+loss:
+  name: "multi_positive"
+  id:
+    enabled: true
+    weight: 0.5
+
+augmentation:
+  enabled: true
+  random_resized_crop:
+    enabled: true
+    scale: [0.85, 1.0]
+  horizontal_flip:
+    enabled: true
+    p: 0.5
+  rotation:
+    enabled: true
+    degrees: 5
+  color_jitter:
+    enabled: true
+    brightness: 0.1
+    contrast: 0.1
+    saturation: 0.1
+    hue: 0.0
+  random_erasing:
+    enabled: true
+    p: 0.1
 
 batch_size: 64
 learning_rate: 0.0001

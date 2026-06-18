@@ -23,14 +23,30 @@ def build_clip_lora(config: dict[str, Any]) -> tuple[PeftModel, CLIPProcessor]:
         parameter.requires_grad = False
 
     lora_config = config["lora"]
+    trainable_config = config.get("trainable", {})
+    modules_to_save = (
+        ["text_projection", "visual_projection"]
+        if trainable_config.get("unfreeze_projection", False)
+        else None
+    )
     peft_config = LoraConfig(
         r=int(lora_config["r"]),
         lora_alpha=int(lora_config["alpha"]),
         lora_dropout=float(lora_config["dropout"]),
         target_modules=list(lora_config["target_modules"]),
         bias="none",
+        modules_to_save=modules_to_save,
     )
     peft_model = get_peft_model(model, peft_config)
+    core_model = base_clip_model(peft_model)
+    if trainable_config.get("unfreeze_projection", False):
+        for module_name in ("text_projection", "visual_projection"):
+            module = getattr(core_model, module_name, None)
+            if module is not None:
+                for parameter in module.parameters():
+                    parameter.requires_grad = True
+    if trainable_config.get("unfreeze_logit_scale", False):
+        core_model.logit_scale.requires_grad = True
     peft_model.print_trainable_parameters()
     return peft_model, processor
 

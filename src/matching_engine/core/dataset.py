@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, Callable, Literal, TypeAlias
 
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+from torchvision import transforms
 
 
 ImageSource: TypeAlias = str | Path | Image.Image
@@ -99,12 +100,19 @@ class CLIP_CUHK_Dataset(Dataset[dict[str, torch.Tensor]]):
         data: list[PairSample] | dict[str, list[Any]],
         processor: Any,
         mode: DatasetMode = "pair",
+        image_transform: Callable[[Image.Image], Image.Image] | None = None,
+        tensor_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        max_samples: int | None = None,
     ) -> None:
         """Store the processor and normalize samples for the selected mode."""
 
         self.processor = processor
         self.mode = mode
+        self.image_transform = image_transform
+        self.tensor_transform = tensor_transform
         self.samples = self._build_samples(data, mode)
+        if max_samples is not None:
+            self.samples = self.samples[:max_samples]
 
     def __len__(self) -> int:
         """Return number of samples."""
@@ -116,6 +124,8 @@ class CLIP_CUHK_Dataset(Dataset[dict[str, torch.Tensor]]):
 
         label, image_source, caption = self.samples[index]
         image = self._load_image(image_source) if image_source is not None else None
+        if image is not None and self.image_transform is not None:
+            image = self.image_transform(image)
         encoded = self.processor(
             text=caption,
             images=image,
@@ -129,6 +139,8 @@ class CLIP_CUHK_Dataset(Dataset[dict[str, torch.Tensor]]):
             for key, value in encoded.items()
             if isinstance(value, torch.Tensor)
         }
+        if "pixel_values" in item and self.tensor_transform is not None:
+            item["pixel_values"] = self.tensor_transform(item["pixel_values"])
         item["label"] = torch.tensor(label, dtype=torch.long)
         return item
 
@@ -184,22 +196,74 @@ class CLIP_CUHK_Dataset(Dataset[dict[str, torch.Tensor]]):
         raise ValueError("Grouped eval data supports only image or text mode.")
 
     def _load_image(self, image_source: ImageSource) -> Image.Image:
-        """Load a PIL image, falling back to the first sample image on error."""
+        """Load a PIL image and fail fast with a clear path on error."""
 
         if isinstance(image_source, Image.Image):
             return image_source.convert("RGB")
         try:
             return Image.open(image_source).convert("RGB")
-        except Exception:
-            fallback = self._first_image_source()
-            if fallback is None or fallback == image_source:
-                raise
-            return self._load_image(fallback)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load image: {image_source}") from exc
 
-    def _first_image_source(self) -> ImageSource | None:
-        """Return first available image source in this dataset."""
 
-        for _label, image_source, _caption in self.samples:
-            if image_source is not None:
-                return image_source
-        return None
+def build_train_augmentation(
+    config: dict[str, Any],
+    image_size: int,
+) -> tuple[Callable[[Image.Image], Image.Image] | None, Callable[[torch.Tensor], torch.Tensor] | None]:
+    """Build optional train-only image and tensor augmentations."""
+
+    if not config.get("enabled", False):
+        return None, None
+
+    image_transforms: list[Callable[[Image.Image], Image.Image]] = []
+    crop_config = config.get("random_resized_crop", {})
+    if crop_config.get("enabled", False):
+        image_transforms.append(
+            transforms.RandomResizedCrop(
+                size=image_size,
+                scale=tuple(crop_config.get("scale", [0.85, 1.0])),
+            )
+        )
+
+    flip_config = config.get("horizontal_flip", {})
+    if flip_config.get("enabled", False):
+        image_transforms.append(
+            transforms.RandomHorizontalFlip(p=float(flip_config.get("p", 0.5)))
+        )
+
+    rotation_config = config.get("rotation", {})
+    if rotation_config.get("enabled", False):
+        image_transforms.append(
+            transforms.RandomRotation(degrees=float(rotation_config.get("degrees", 5)))
+        )
+
+    jitter_config = config.get("color_jitter", {})
+    if jitter_config.get("enabled", False):
+        image_transforms.append(
+            transforms.ColorJitter(
+                brightness=float(jitter_config.get("brightness", 0.1)),
+                contrast=float(jitter_config.get("contrast", 0.1)),
+                saturation=float(jitter_config.get("saturation", 0.1)),
+                hue=float(jitter_config.get("hue", 0.0)),
+            )
+        )
+
+    erase_config = config.get("random_erasing", {})
+    tensor_transform = (
+        transforms.RandomErasing(p=float(erase_config.get("p", 0.1)))
+        if erase_config.get("enabled", False)
+        else None
+    )
+    image_transform = transforms.Compose(image_transforms) if image_transforms else None
+    return image_transform, tensor_transform
+
+
+def clip_image_size(processor: Any) -> int:
+    """Return the CLIP processor image size for augmentation crops."""
+
+    size = getattr(getattr(processor, "image_processor", None), "size", None)
+    if isinstance(size, dict):
+        return int(size.get("height") or size.get("shortest_edge") or 224)
+    if isinstance(size, int):
+        return size
+    return 224

@@ -27,7 +27,12 @@ PROJECT_ROOT = _bootstrap_project_root()
 
 from src.matching_engine.core.dataset import CLIP_CUHK_Dataset, CUHKPEDES  # noqa: E402
 from src.matching_engine.core.metrics import Evaluator  # noqa: E402
-from src.matching_engine.core.training import load_config, pick_device, resolve_path  # noqa: E402
+from src.matching_engine.core.training import (  # noqa: E402
+    load_config,
+    load_matching_extra_state,
+    pick_device,
+    resolve_path,
+)
 from src.utils.logger import setup_logger  # noqa: E402
 
 
@@ -43,6 +48,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-root", default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--i2t", action="store_true", help="Also report image-to-text.")
+    parser.add_argument("--zero-shot", action="store_true")
+    parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--max-val-images", type=int, default=None)
+    parser.add_argument("--max-val-texts", type=int, default=None)
     return parser.parse_args()
 
 
@@ -54,24 +63,48 @@ def main() -> int:
     adapter_dir = resolve_path(args.adapter_dir, PROJECT_ROOT)
     dataset_root = resolve_path(args.dataset_root or config["dataset_root"], PROJECT_ROOT)
     batch_size = int(args.batch_size or config["batch_size"])
-    if not adapter_dir.exists():
+    max_val_images = args.max_val_images
+    max_val_texts = args.max_val_texts
+    if args.smoke_test:
+        max_val_images = max_val_images or 64
+        max_val_texts = max_val_texts or 128
+    if not args.zero_shot and not adapter_dir.exists():
         raise RuntimeError(f"Best adapter not found: {adapter_dir}")
 
     device = pick_device()
-    logger.info("Using device=%s dataset_root=%s adapter_dir=%s", device, dataset_root, adapter_dir)
+    logger.info(
+        "Using device=%s dataset_root=%s mode=%s",
+        device,
+        dataset_root,
+        "zero-shot" if args.zero_shot else f"adapter:{adapter_dir}",
+    )
     base_model = CLIPModel.from_pretrained(config["model_name"])
-    model = PeftModel.from_pretrained(base_model, adapter_dir).to(device)
+    if args.zero_shot:
+        model = base_model.to(device)
+    else:
+        model = PeftModel.from_pretrained(base_model, adapter_dir).to(device)
+        load_matching_extra_state(model, adapter_dir, device)
     processor = CLIPProcessor.from_pretrained(config["model_name"])
 
     dataset = CUHKPEDES(dataset_root)
     img_loader = DataLoader(
-        CLIP_CUHK_Dataset(dataset.test, processor, mode="image"),
+        CLIP_CUHK_Dataset(
+            dataset.test,
+            processor,
+            mode="image",
+            max_samples=max_val_images,
+        ),
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
     )
     txt_loader = DataLoader(
-        CLIP_CUHK_Dataset(dataset.test, processor, mode="text"),
+        CLIP_CUHK_Dataset(
+            dataset.test,
+            processor,
+            mode="text",
+            max_samples=max_val_texts,
+        ),
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
