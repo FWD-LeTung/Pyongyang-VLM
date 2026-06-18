@@ -17,6 +17,9 @@ trainable:
   unfreeze_projection: true
   unfreeze_logit_scale: true
 
+distributed:
+  find_unused_parameters: true
+
 loss:
   name: "multi_positive"
   id:

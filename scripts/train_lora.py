@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from torch.utils.data import DataLoader
 
 
@@ -82,12 +82,22 @@ def main() -> int:
         max_val_texts = max_val_texts or 128
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    accelerator = Accelerator()
+    distributed_config = config.get("distributed", {})
+    find_unused_parameters = (
+        bool(distributed_config.get("find_unused_parameters", True))
+        if isinstance(distributed_config, dict)
+        else True
+    )
+    ddp_kwargs = DistributedDataParallelKwargs(
+        find_unused_parameters=find_unused_parameters
+    )
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
     if accelerator.is_main_process:
         logger.info(
-            "Using device=%s num_processes=%s dataset_root=%s output_dir=%s",
+            "Using device=%s num_processes=%s find_unused_parameters=%s dataset_root=%s output_dir=%s",
             accelerator.device,
             accelerator.num_processes,
+            find_unused_parameters,
             dataset_root,
             output_dir,
         )

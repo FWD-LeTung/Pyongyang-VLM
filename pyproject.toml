@@ -23,6 +23,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "transformers>=5.5.0",
     "ultralytics>=8.4.34",
+    "wrapt>=2.2.1",
     "yt-dlp>=2026.3.17",
 ]
 
