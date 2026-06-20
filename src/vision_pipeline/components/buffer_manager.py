@@ -34,7 +34,10 @@ class TrackletBufferManager:
         for person in people:
             current_track_ids.add(person.track_id)
             buffer = self._ensure_buffer(person)
+            if not buffer["images"]:
+                buffer["first_seen"] = float(person.timestamp)
             buffer["images"].append(person.image_crop)
+            buffer["frame_ids"].append(int(person.frame_id))
             buffer["bboxes"].append(person.bbox)
             buffer["confidence_scores"].append(float(person.conf))
             buffer["timestamps"].append(float(person.timestamp))
@@ -78,6 +81,7 @@ class TrackletBufferManager:
         if person.track_id not in self.tracklets_buffer:
             self.tracklets_buffer[person.track_id] = {
                 "images": [],
+                "frame_ids": [],
                 "bboxes": [],
                 "confidence_scores": [],
                 "timestamps": [],
@@ -95,11 +99,24 @@ class TrackletBufferManager:
             "status": status,
             "images": list(buffer["images"]),
             "metadata": {
+                "frame_ids": [int(frame_id) for frame_id in buffer["frame_ids"]],
                 "bboxes": [list(map(int, bbox)) for bbox in buffer["bboxes"]],
                 "confidence_scores": [
                     float(score) for score in buffer["confidence_scores"]
                 ],
                 "timestamps": [float(ts) for ts in buffer["timestamps"]],
+                "timeline_frame_ids": [
+                    int(frame_id) for frame_id in buffer["frame_ids"]
+                ],
+                "timeline_bboxes": [
+                    list(map(int, bbox)) for bbox in buffer["bboxes"]
+                ],
+                "timeline_timestamps": [
+                    float(ts) for ts in buffer["timestamps"]
+                ],
+                "timeline_confidence_scores": [
+                    float(score) for score in buffer["confidence_scores"]
+                ],
                 "time_start": float(buffer["timestamps"][0]),
                 "time_end": float(buffer["timestamps"][-1]),
                 "first_seen": float(buffer["first_seen"]),
@@ -112,6 +129,7 @@ class TrackletBufferManager:
 
         buffer = self.tracklets_buffer[track_id]
         buffer["images"].clear()
+        buffer["frame_ids"].clear()
         buffer["bboxes"].clear()
         buffer["confidence_scores"].clear()
         buffer["timestamps"].clear()

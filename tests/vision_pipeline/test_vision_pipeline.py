@@ -40,6 +40,7 @@ def test_video_reader_uses_video_timestamp() -> None:
 
     assert packet is not None
     assert packet.timestamp == 1.5
+    assert packet.frame_id == 0
     assert np.array_equal(packet.frame, frame)
     assert capture.released is True
 
@@ -51,11 +52,12 @@ def test_stream_queue_drops_old_frames_when_full() -> None:
     old_frame = np.zeros((2, 2, 3), dtype=np.uint8)
     new_frame = np.ones((2, 2, 3), dtype=np.uint8)
 
-    reader._put_latest(FramePacket(old_frame, 1.0))
-    reader._put_latest(FramePacket(new_frame, 2.0))
+    reader._put_latest(FramePacket(old_frame, 1.0, 7))
+    reader._put_latest(FramePacket(new_frame, 2.0, 8))
     packet = reader.frame_queue.get_nowait()
 
     assert packet.timestamp == 2.0
+    assert packet.frame_id == 8
     assert np.array_equal(packet.frame, new_frame)
     assert reader.dropped_frames == 1
 
@@ -70,10 +72,11 @@ def test_cropper_clamps_bbox_and_filters_small_crops() -> None:
         TrackedObject(1, 1, 10, 12, track_id=6, conf=0.8),
     ]
 
-    people = cropper.crop(frame, tracked_objects, timestamp=123.0)
+    people = cropper.crop(frame, tracked_objects, timestamp=123.0, frame_id=42)
 
     assert len(people) == 1
     assert people[0].track_id == 5
+    assert people[0].frame_id == 42
     assert people[0].bbox == [0, 10, 50, 80]
     assert people[0].image_crop.shape == (224, 224, 3)
     assert np.all(people[0].image_crop[:, :32] == 0)
@@ -115,7 +118,10 @@ def test_buffer_emits_ready_payload_and_keeps_track_id() -> None:
     assert payloads[0]["track_id"] == 105
     assert payloads[0]["status"] == "ready"
     assert len(payloads[0]["images"]) == 2
+    assert payloads[0]["metadata"]["frame_ids"] == [0, 0]
+    assert payloads[0]["metadata"]["timeline_frame_ids"] == [0, 0]
     assert manager.tracklets_buffer[105]["images"] == []
+    assert manager.tracklets_buffer[105]["frame_ids"] == []
     assert manager.tracklets_buffer[105]["first_seen"] == 1.0
     assert manager.tracklets_buffer[105]["last_seen"] == 2.0
     assert 105 in manager.tracklets_buffer
@@ -165,7 +171,7 @@ def test_pipeline_emits_payloads_and_pushes_output_queue() -> None:
     output_queue: Queue = Queue()
     pipeline = VisionPipeline(
         config,
-        reader=FakeReader([FramePacket(frame, 1.0), FramePacket(frame, 2.0)]),
+        reader=FakeReader([FramePacket(frame, 1.0, 0), FramePacket(frame, 2.0, 1)]),
         detector=FakeDetector(),
         tracker=FakePipelineTracker(),
         cropper=PersonCropper(config.cropper),
@@ -180,6 +186,7 @@ def test_pipeline_emits_payloads_and_pushes_output_queue() -> None:
 
     assert len(payloads) == 1
     assert payloads[0]["status"] == "ready"
+    assert payloads[0]["metadata"]["frame_ids"] == [0, 1]
     assert output_queue.get_nowait()["track_id"] == 1
 
 
@@ -192,6 +199,7 @@ def make_person(track_id: int, timestamp: float) -> PersonData:
         bbox=[10, 20, 80, 180],
         conf=0.88,
         timestamp=timestamp,
+        frame_id=0,
     )
 
 

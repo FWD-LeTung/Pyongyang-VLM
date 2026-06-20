@@ -22,6 +22,7 @@ class FramePacket:
 
     frame: ImageArray
     timestamp: float
+    frame_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class PersonData:
     bbox: list[int]
     conf: float
     timestamp: float
+    frame_id: int = 0
 
 
 @dataclass(frozen=True)

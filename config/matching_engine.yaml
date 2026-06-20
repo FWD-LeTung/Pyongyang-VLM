@@ -1,5 +1,37 @@
 model_name: "openai/clip-vit-base-patch16"
 
+retrieval:
+  backend: "tbps_clip"
+  tbps_root: "src/matching_engine/TBPS-CLIP"
+  config_path: "src/matching_engine/TBPS-CLIP/config/config.yaml"
+  checkpoint_path: "weights/checkpoint_best.pth"
+  device: "cuda"
+  precision: "fp16"
+
+candidate:
+  min_total_images: 3
+  min_total_chunks: 1
+
+chunk:
+  samples_per_chunk: 3
+  max_samples_per_chunk: 5
+  min_images_per_chunk: 1
+  sampling_strategy: "quality_even"
+
+cache:
+  enabled: true
+  dtype: "fp16"
+  device: "cuda"
+  storage: "memory"
+
+track_scoring:
+  crop_topk: 2
+  top_chunks: 5
+  aggregation: "top_chunks_mean"
+
+runtime:
+  encode_batch_size: 32
+
 lora:
   r: 16
   alpha: 32
