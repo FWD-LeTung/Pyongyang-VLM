@@ -26,6 +26,7 @@ class PersonCropper:
         frame: np.ndarray,
         tracked_objects: list[TrackedObject],
         timestamp: float,
+        frame_id: int = 0,
     ) -> list[PersonData]:
         """Crop each tracked person into RAM-only ``PersonData`` objects."""
 
@@ -53,6 +54,7 @@ class PersonCropper:
                     bbox=[x1, y1, x2, y2],
                     conf=tracked_object.conf,
                     timestamp=timestamp,
+                    frame_id=frame_id,
                 )
             )
 

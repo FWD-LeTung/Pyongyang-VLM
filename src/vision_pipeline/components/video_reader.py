@@ -46,6 +46,7 @@ class FrameSource:
         self._capture: Any | None = None
         self._stream_capture: Any | None = None
         self._video_read_attempts = 0
+        self._stream_frame_id = 0
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._drop_lock = threading.Lock()
@@ -188,11 +189,12 @@ class FrameSource:
             if not ok:
                 return None
 
+        frame_id = self._video_read_attempts
         self._video_read_attempts += 1
         timestamp = 0.0
         if hasattr(self._capture, "get"):
             timestamp = float(self._capture.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
-        return FramePacket(frame=frame, timestamp=timestamp)
+        return FramePacket(frame=frame, timestamp=timestamp, frame_id=frame_id)
 
     def _open_ffmpeg_fallback(self) -> "_FfmpegVideoCapture | None":
         """Open a video file through ffmpeg when OpenCV cannot decode it."""
@@ -228,7 +230,13 @@ class FrameSource:
                 if not ok:
                     logger.warning("RTSP read failed. Reconnecting: %s", self.source)
                     break
-                self._put_latest(FramePacket(frame=frame, timestamp=self.time_source()))
+                packet = FramePacket(
+                    frame=frame,
+                    timestamp=self.time_source(),
+                    frame_id=self._stream_frame_id,
+                )
+                self._stream_frame_id += 1
+                self._put_latest(packet)
 
             self._release_capture(capture)
             self._stream_capture = None

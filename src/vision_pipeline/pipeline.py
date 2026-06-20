@@ -122,7 +122,12 @@ class VisionPipeline:
 
         detections = self.detector.detect(packet.frame, packet.timestamp)
         tracked_objects = self.tracker.update(detections, packet.frame, packet.timestamp)
-        people = self.cropper.crop(packet.frame, tracked_objects, packet.timestamp)
+        people = self.cropper.crop(
+            packet.frame,
+            tracked_objects,
+            packet.timestamp,
+            packet.frame_id,
+        )
         payloads = self.buffer_manager.update(people, packet.timestamp)
         return FrameProcessingResult(
             detections=detections,
