@@ -38,14 +38,22 @@ class TBPSCLIPEncoder:
         device: str = "cuda",
         precision: str = "fp16",
         batch_size: int = 32,
+        allow_cpu_fallback: bool = False,
     ) -> None:
         self.tbps_root = Path(tbps_root or self._default_tbps_root()).resolve()
         self.config_path = Path(config_path or self.tbps_root / "config/config.yaml")
         self.checkpoint_path = Path(checkpoint_path)
-        self.device = self._resolve_device(device)
+        self.device = self._resolve_device(
+            device,
+            allow_cpu_fallback=allow_cpu_fallback,
+        )
         self.precision = precision
         self.use_half = self.device.type == "cuda" and precision == "fp16"
         self.batch_size = max(1, int(batch_size))
+        self.allow_cpu_fallback = allow_cpu_fallback
+        self.checkpoint_missing_keys_allowed: list[str] = []
+        self.checkpoint_missing_keys_dangerous: list[str] = []
+        self.checkpoint_unexpected_keys: list[str] = []
 
         if not self.tbps_root.exists():
             raise FileNotFoundError(f"TBPS-CLIP root not found: {self.tbps_root}")
@@ -60,6 +68,11 @@ class TBPSCLIPEncoder:
         self._official_load_checkpoint = self._import_official_loader()
         self._model = self._build_model()
         self._image_transform = self._build_image_transform()
+        logger.info(
+            "tbps_device=%s precision=%s",
+            self.device,
+            "fp16" if self.use_half else "fp32",
+        )
 
     @torch.inference_mode()
     def encode_text(self, texts: Sequence[str]) -> torch.Tensor:
@@ -121,8 +134,18 @@ class TBPSCLIPEncoder:
         if self.use_half:
             model.half()
         model.eval()
+        self._validate_checkpoint_keys(load_result)
         logger.info("Loaded TBPS-CLIP checkpoint: %s", self.checkpoint_path)
         logger.info("TBPS-CLIP load result: %s", load_result)
+        logger.info(
+            "checkpoint_missing_keys_allowed=%s",
+            self.checkpoint_missing_keys_allowed,
+        )
+        logger.info(
+            "checkpoint_missing_keys_dangerous=%s",
+            self.checkpoint_missing_keys_dangerous,
+        )
+        logger.info("checkpoint_unexpected_keys=%s", self.checkpoint_unexpected_keys)
         return model
 
     def _build_tbps_config(self) -> "_AttrDict":
@@ -196,12 +219,44 @@ class TBPSCLIPEncoder:
         state_dict = _strip_prefixes(state_dict, prefixes=("module.", "model."))
         return model.load_state_dict(state_dict, strict=False)
 
+    def _validate_checkpoint_keys(self, load_result: object) -> None:
+        """Fail fast if retrieval-critical checkpoint keys are missing."""
+
+        missing_keys = list(getattr(load_result, "missing_keys", []) or [])
+        unexpected_keys = list(getattr(load_result, "unexpected_keys", []) or [])
+        allowed_prefixes = ("simclr_mlp.", "classifier.", "mlm_head.")
+
+        allowed_missing = [
+            key for key in missing_keys if key.startswith(allowed_prefixes)
+        ]
+        dangerous_missing = [
+            key for key in missing_keys if not key.startswith(allowed_prefixes)
+        ]
+
+        self.checkpoint_missing_keys_allowed = allowed_missing
+        self.checkpoint_missing_keys_dangerous = dangerous_missing
+        self.checkpoint_unexpected_keys = unexpected_keys
+
+        if dangerous_missing:
+            raise RuntimeError(
+                "TBPS-CLIP checkpoint is missing retrieval-critical keys: "
+                f"{dangerous_missing}"
+            )
+
     def _build_image_transform(self) -> transforms.Compose:
         size = self._tbps_config.experiment.input_resolution
         if isinstance(size, int):
             size = (size, size)
         else:
             size = tuple(int(value) for value in size)
+        logger.info(
+            "image_preprocess_source=official_tbps_clip input_size=%s "
+            "mean=%s std=%s bgr_to_rgb=%s",
+            size,
+            [0.485, 0.456, 0.406],
+            [0.229, 0.224, 0.225],
+            True,
+        )
         return transforms.Compose(
             [
                 transforms.Resize(
@@ -256,7 +311,9 @@ class TBPSCLIPEncoder:
 
     def _import_tokenizer(self) -> Any:
         try:
-            return importlib.import_module("text_utils.tokenizer").tokenize
+            tokenizer = importlib.import_module("text_utils.tokenizer").tokenize
+            logger.info("tokenizer_source=official_tbps_clip")
+            return tokenizer
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
                 "Failed to import TBPS-CLIP tokenizer. Install the official "
@@ -269,9 +326,15 @@ class TBPSCLIPEncoder:
         return importlib.import_module("misc.build").load_checkpoint
 
     @staticmethod
-    def _resolve_device(device: str) -> torch.device:
+    def _resolve_device(device: str, *, allow_cpu_fallback: bool = False) -> torch.device:
         if device.startswith("cuda") and not torch.cuda.is_available():
-            logger.warning("CUDA requested for TBPS-CLIP but unavailable; using CPU.")
+            message = (
+                "CUDA was requested but torch.cuda.is_available() is False. "
+                "Use --device cpu or pass --allow-cpu-fallback."
+            )
+            if not allow_cpu_fallback:
+                raise RuntimeError(message)
+            logger.warning("%s Falling back to CPU.", message)
             return torch.device("cpu")
         return torch.device(device)
 
@@ -286,11 +349,14 @@ class TBPSCLIPEncoder:
         if "ftfy" not in sys.modules:
             try:
                 importlib.import_module("ftfy")
+                logger.info("text_cleanup_source=official_ftfy")
             except ModuleNotFoundError:
                 ftfy_stub = types.ModuleType("ftfy")
                 ftfy_stub.fix_text = lambda text: text
                 sys.modules["ftfy"] = ftfy_stub
                 logger.warning("ftfy is unavailable; using identity text cleanup.")
+        else:
+            logger.info("text_cleanup_source=official_ftfy")
 
         if "easydict" not in sys.modules:
             easydict_stub = types.ModuleType("easydict")

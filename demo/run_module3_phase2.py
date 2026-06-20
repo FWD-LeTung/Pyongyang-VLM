@@ -1,232 +1,248 @@
-"""Run Matching Engine Phase 2 on saved payloads or a demo video."""
+"""Minimal Module 1 -> Module 2 -> Module 3 demo runner."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from collections.abc import Sequence
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
-from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.matching_engine.components.embedding_cache import EmbeddingCache
-from src.matching_engine.config import (
-    CacheConfig,
-    CandidateConfig,
-    load_matching_engine_config,
-)
 from src.matching_engine.pipeline import MatchingEnginePipeline
 from src.matching_engine.schema import (
     MatchingEngineRequest,
-    QueryMetadata,
+    MatchingEngineResponse,
     QueryUnderstandingPayload,
     TrackletPayloadInput,
-    VectorSearchPayload,
 )
+from src.query_understanding.llm_parser import QueryParser
+from src.query_understanding.schema import QueryUnderstandingResponse
+from src.utils.logger import setup_logger
 from src.vision_pipeline.pipeline import VisionPipeline
 
 
-class FakeEncoder:
-    """Tiny deterministic backend for smoke testing without a checkpoint."""
-
-    def encode_text(self, texts: Sequence[str]) -> torch.Tensor:
-        return torch.stack([self._embedding(text) for text in texts], dim=0)
-
-    def encode_images(self, images: Sequence[Any]) -> torch.Tensor:
-        return torch.stack([self._embedding(str(image)) for image in images], dim=0)
-
-    @staticmethod
-    def _embedding(value: str) -> torch.Tensor:
-        lowered = value.lower()
-        if "red" in lowered:
-            vector = torch.tensor([1.0, 0.0, 0.0])
-        elif "blue" in lowered:
-            vector = torch.tensor([0.0, 1.0, 0.0])
-        else:
-            vector = torch.tensor([0.0, 0.0, 1.0])
-        return F.normalize(vector, dim=0)
+logger = setup_logger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config/matching_engine.yaml")
-    parser.add_argument("--vision-config", default="config/vision_pipeline.yaml")
-    parser.add_argument("--backend", choices=["tbps", "fake"], default="tbps")
-    parser.add_argument("--checkpoint", default=None)
-    parser.add_argument("--device", default=None)
-    parser.add_argument("--precision", default=None)
-    parser.add_argument("--query", default=None)
-    parser.add_argument("--query-json", default=None)
-    parser.add_argument("--tracklets-json", default=None)
-    parser.add_argument("--video", default=None)
-    parser.add_argument("--max-frames", type=int, default=120)
-    parser.add_argument("--video-id", default=None)
-    parser.add_argument("--session-id", default="demo")
-    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--video", required=True, help="Input video path.")
+    parser.add_argument("--query", required=True, help="Raw pedestrian query.")
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=100,
+    )
+    parser.add_argument(
+        "--vision-config",
+        default="config/vision_pipeline.yaml",
+        help="Module 2 config path.",
+    )
+    parser.add_argument(
+        "--matching-config",
+        default="config/matching_engine.yaml",
+        help="Module 3 config path.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        default=None,
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+    )
+    parser.add_argument(
+        "--precision",
+        default="fp32",
+        choices=["fp32", "fp16"],
+    )
+    parser.add_argument(
+        "--session-id",
+        default="demo",
+    )
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    if args.smoke:
-        request = _smoke_request()
-        pipeline = _fake_pipeline(args.config)
-    else:
-        request = _build_request(args)
-        pipeline = _build_pipeline(args)
+def run_module1(raw_query: str) -> QueryUnderstandingPayload:
+    """Run Query Understanding and adapt its response for Module 3."""
 
-    response = pipeline.run(request)
+    logger.info("Running Module 1 Query Understanding.")
+    response: QueryUnderstandingResponse = QueryParser().parse(raw_query)
+    if response.metadata.status != "success":
+        raise RuntimeError(
+            "Module 1 failed: "
+            f"status={response.metadata.status} "
+            f"error_code={response.metadata.error_code}"
+        )
+
+    query_payload = QueryUnderstandingPayload.model_validate(
+        response.model_dump(mode="json")
+    )
+    normalized_text = query_payload.vector_search_payload.normalized_text.strip()
+    if not normalized_text:
+        raise RuntimeError("Module 1 returned an empty normalized_text.")
+    return query_payload
+
+
+def run_module2(
+    *,
+    video: str,
+    vision_config: str,
+    max_frames: int,
+) -> tuple[list[TrackletPayloadInput], dict[str, Any]]:
+    """Run the vision pipeline and return typed tracklet chunks."""
+
+    logger.info("Running Module 2 Vision Pipeline.")
+    vision = VisionPipeline.from_config_file(
+        vision_config,
+        source=video,
+        mode="video",
+    )
+    payloads = vision.run(max_frames=max_frames)
+    tracklets = [
+        TrackletPayloadInput.model_validate(payload)
+        for payload in payloads
+    ]
+    return tracklets, dict(getattr(vision, "last_run_stats", {}) or {})
+
+
+def run_module3(
+    *,
+    query_payload: QueryUnderstandingPayload,
+    tracklets: list[TrackletPayloadInput],
+    video: str,
+    session_id: str,
+    matching_config: str,
+    checkpoint: str | None,
+    device: str,
+    precision: str,
+) -> MatchingEngineResponse:
+    """Run the matching engine over Module 2 tracklet chunks."""
+
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        logger.warning("CUDA requested but torch.cuda.is_available() is False.")
+        raise RuntimeError(
+            "CUDA was requested but is unavailable. Use --device cpu for local demo."
+        )
+    if device == "cpu":
+        print(
+            "Running TBPS-CLIP on CPU. This may be slow. "
+            "Use small --max-frames for local demo."
+        )
+
+    logger.info("Running Module 3 Matching Engine.")
+    pipeline = MatchingEnginePipeline.from_config_file(
+        matching_config,
+        checkpoint_path=checkpoint,
+        device=device,
+        precision=precision,
+    )
+    request = MatchingEngineRequest(
+        query=query_payload,
+        tracklets=tracklets,
+        video_id=video,
+        session_id=session_id,
+    )
+    return pipeline.run(request)
+
+
+def print_summary(
+    *,
+    query_payload: QueryUnderstandingPayload,
+    video: str,
+    max_frames: int,
+    vision_stats: dict[str, Any],
+    num_payload_chunks: int,
+    response: MatchingEngineResponse,
+) -> None:
+    """Print a compact human-readable result summary."""
+
+    selected_timeline_length = (
+        len(response.selected_track.frame_ids)
+        if response.selected_track is not None
+        else 0
+    )
+
+    print("\n=== Query ===")
+    print(f"original_query: {query_payload.metadata.original_query}")
+    print(
+        "normalized_text: "
+        f"{query_payload.vector_search_payload.normalized_text}"
+    )
+    print(f"language_detected: {query_payload.metadata.language_detected}")
+    print(f"generation_source: {query_payload.generation_source}")
+
+    print("\n=== Vision ===")
+    print(f"video: {video}")
+    print(f"requested_max_frames: {vision_stats.get('requested_max_frames', max_frames)}")
+    print(f"processed_frames: {vision_stats.get('processed_frames', 'unknown')}")
+    print(f"stop_reason: {vision_stats.get('stop_reason', 'unknown')}")
+    print(f"num_payload_chunks: {num_payload_chunks}")
+
+    print("\n=== Matching ===")
     print(f"status: {response.status}")
     print(f"message: {response.message}")
     print(f"best_track_id: {response.best_track_id}")
     print(f"best_score: {response.best_score:.6f}")
-    print("ranking:")
-    for result in response.ranking:
+    print(f"selected_timeline_length: {selected_timeline_length}")
+
+    if not response.ranking:
+        print("\nNo candidate found.")
+        return
+
+    if len(response.ranking) >= 2:
+        margin = response.ranking[0].score - response.ranking[1].score
+        if margin < 0.005:
+            print("WARNING: ambiguous match, top1-top2 margin is too small.")
+
+    print("\nTop ranking:")
+    for result in response.ranking[:5]:
         print(
-            f"  #{result.rank} track_id={result.track_id} "
-            f"score={result.score:.6f} chunks={result.num_chunks} "
+            f"#{result.rank} track_id={result.track_id} "
+            f"score={result.score:.6f} "
+            f"chunks={result.num_chunks} "
             f"samples={result.num_sampled_crops}"
         )
-    selected_len = len(response.selected_track.frame_ids) if response.selected_track else 0
-    print(f"selected_timeline_length: {selected_len}")
-    return 0
 
 
-def _build_pipeline(args: argparse.Namespace) -> MatchingEnginePipeline:
-    if args.backend == "fake":
-        return _fake_pipeline(args.config)
-    return MatchingEnginePipeline.from_config_file(
-        args.config,
-        checkpoint_path=args.checkpoint,
-        device=args.device,
-        precision=args.precision,
-    )
+def main() -> int:
+    """Run the full demo."""
 
-
-def _fake_pipeline(config_path: str) -> MatchingEnginePipeline:
-    config = load_matching_engine_config(config_path)
-    config = replace(
-        config,
-        candidate=CandidateConfig(min_total_images=1, min_total_chunks=1),
-        cache=CacheConfig(enabled=True, dtype="fp32", device="cpu"),
-    )
-    return MatchingEnginePipeline(
-        encoder=FakeEncoder(),
-        config=config,
-        cache=EmbeddingCache(enabled=True, dtype="fp32", device="cpu"),
-    )
-
-
-def _build_request(args: argparse.Namespace) -> MatchingEngineRequest:
-    query = _load_query(args)
-    if args.tracklets_json:
-        tracklets = _load_tracklets(Path(args.tracklets_json))
-    elif args.video:
-        vision = VisionPipeline.from_config_file(
-            args.vision_config,
-            source=args.video,
-            mode="video",
+    args = parse_args()
+    try:
+        query_payload = run_module1(args.query)
+        tracklets, vision_stats = run_module2(
+            video=args.video,
+            vision_config=args.vision_config,
+            max_frames=args.max_frames,
         )
-        tracklets = [
-            TrackletPayloadInput.model_validate(payload)
-            for payload in vision.run(max_frames=args.max_frames)
-        ]
-    else:
-        raise ValueError("Provide --tracklets-json, --video, or --smoke.")
-    return MatchingEngineRequest(
-        query=query,
-        tracklets=tracklets,
-        video_id=args.video_id or args.video,
-        session_id=args.session_id,
-    )
-
-
-def _load_query(args: argparse.Namespace) -> QueryUnderstandingPayload:
-    if args.query_json:
-        return QueryUnderstandingPayload.model_validate(
-            json.loads(Path(args.query_json).read_text(encoding="utf-8"))
+        response = run_module3(
+            query_payload=query_payload,
+            tracklets=tracklets,
+            video=args.video,
+            session_id=args.session_id,
+            matching_config=args.matching_config,
+            checkpoint=args.checkpoint,
+            device=args.device,
+            precision=args.precision,
         )
-    if args.query:
-        return QueryUnderstandingPayload(
-            metadata=QueryMetadata(original_query=args.query, status="success"),
-            vector_search_payload=VectorSearchPayload(normalized_text=args.query),
+        print_summary(
+            query_payload=query_payload,
+            video=args.video,
+            max_frames=args.max_frames,
+            vision_stats=vision_stats,
+            num_payload_chunks=len(tracklets),
+            response=response,
         )
-    raise ValueError("Provide --query, --query-json, or --smoke.")
-
-
-def _load_tracklets(path: Path) -> list[TrackletPayloadInput]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, list):
-        raise ValueError("Tracklets JSON must be a list of Module 2 payload chunks.")
-    return [TrackletPayloadInput.model_validate(_materialize_images(item)) for item in raw]
-
-
-def _materialize_images(payload: dict[str, Any]) -> dict[str, Any]:
-    converted = dict(payload)
-    images = []
-    for image in converted.get("images", []):
-        image_path = Path(image) if isinstance(image, str) else None
-        if image_path is not None and image_path.exists():
-            images.append(Image.open(image_path).convert("RGB"))
-        else:
-            images.append(image)
-    converted["images"] = images
-    return converted
-
-
-def _smoke_request() -> MatchingEngineRequest:
-    return MatchingEngineRequest(
-        query=QueryUnderstandingPayload(
-            metadata=QueryMetadata(original_query="red shirt", status="success"),
-            vector_search_payload=VectorSearchPayload(normalized_text="red shirt"),
-        ),
-        tracklets=[
-            {
-                "track_id": 7,
-                "status": "ready",
-                "images": ["red-a", "red-b"],
-                "metadata": {
-                    "frame_ids": [1, 2],
-                    "bboxes": [[10, 20, 50, 90], [11, 20, 51, 90]],
-                    "timestamps": [0.1, 0.2],
-                    "confidence_scores": [0.9, 0.88],
-                },
-            },
-            {
-                "track_id": 7,
-                "status": "ready",
-                "images": ["red-c"],
-                "metadata": {
-                    "frame_ids": [3],
-                    "bboxes": [[12, 20, 52, 90]],
-                    "timestamps": [0.3],
-                    "confidence_scores": [0.91],
-                },
-            },
-            {
-                "track_id": 3,
-                "status": "ready",
-                "images": ["blue-a", "blue-b"],
-                "metadata": {
-                    "frame_ids": [1, 2],
-                    "bboxes": [[60, 20, 100, 90], [61, 20, 101, 90]],
-                    "timestamps": [0.1, 0.2],
-                    "confidence_scores": [0.9, 0.9],
-                },
-            },
-        ],
-        video_id="smoke-video",
-        session_id="smoke-session",
-    )
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

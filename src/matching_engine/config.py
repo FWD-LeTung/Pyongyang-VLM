@@ -59,6 +59,13 @@ class TrackScoringConfig:
 
 
 @dataclass(frozen=True)
+class ConfidenceConfig:
+    """Score diagnostics for ambiguous matches."""
+
+    ambiguous_margin_threshold: float = 0.005
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Runtime batching settings."""
 
@@ -74,6 +81,7 @@ class MatchingEngineConfig:
     chunk: ChunkConfig = field(default_factory=ChunkConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     track_scoring: TrackScoringConfig = field(default_factory=TrackScoringConfig)
+    confidence: ConfidenceConfig = field(default_factory=ConfidenceConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     @classmethod
@@ -86,6 +94,7 @@ class MatchingEngineConfig:
         chunk = _as_dict(data.get("chunk"))
         cache = _as_dict(data.get("cache"))
         scoring = _as_dict(data.get("track_scoring"))
+        confidence = _as_dict(data.get("confidence"))
         runtime = _as_dict(data.get("runtime"))
 
         return cls(
@@ -149,6 +158,14 @@ class MatchingEngineConfig:
                 aggregation=str(
                     scoring.get("aggregation", TrackScoringConfig.aggregation)
                 ),
+            ),
+            confidence=ConfidenceConfig(
+                ambiguous_margin_threshold=float(
+                    confidence.get(
+                        "ambiguous_margin_threshold",
+                        ConfidenceConfig.ambiguous_margin_threshold,
+                    )
+                )
             ),
             runtime=RuntimeConfig(
                 encode_batch_size=int(

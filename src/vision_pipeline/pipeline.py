@@ -47,6 +47,7 @@ class VisionPipeline:
         self.cropper = cropper or PersonCropper(config.cropper)
         self.buffer_manager = buffer_manager or TrackletBufferManager(config.buffer)
         self._last_processed_timestamp: float | None = None
+        self.last_run_stats: dict[str, int | str | None] = {}
 
     @classmethod
     def from_config_file(
@@ -79,26 +80,47 @@ class VisionPipeline:
 
         emitted_payloads: list[TrackletPayload] = []
         processed_frames = 0
+        read_frames = 0
+        skipped_frames = 0
+        stop_reason = "end_of_video" if self.config.reader.mode == "video" else "stream_stopped"
 
         with self.reader:
-            for packet in self.reader.frames(max_frames=max_frames):
+            for packet in self.reader.frames(max_frames=None):
+                read_frames += 1
                 if not self.should_process(packet.timestamp):
+                    skipped_frames += 1
                     continue
 
                 payloads = self.process_frame(packet)
                 self._dispatch(payloads, output_queue)
                 emitted_payloads.extend(payloads)
                 processed_frames += 1
+                if max_frames is not None and processed_frames >= max_frames:
+                    stop_reason = "max_frames_reached"
+                    break
 
         if flush_on_end:
             payloads = self.buffer_manager.flush_all(status="lost")
             self._dispatch(payloads, output_queue)
             emitted_payloads.extend(payloads)
 
+        self.last_run_stats = {
+            "requested_max_frames": max_frames,
+            "processed_frames": processed_frames,
+            "read_frames": read_frames,
+            "skipped_frames": skipped_frames,
+            "payloads": len(emitted_payloads),
+            "stop_reason": stop_reason,
+        }
         logger.info(
-            "Vision pipeline stopped after %s processed frame(s), %s payload(s).",
+            "Vision pipeline stopped requested_max_frames=%s processed_frames=%s "
+            "read_frames=%s skipped_frames=%s payloads=%s stop_reason=%s",
+            max_frames,
             processed_frames,
+            read_frames,
+            skipped_frames,
             len(emitted_payloads),
+            stop_reason,
         )
         return emitted_payloads
 

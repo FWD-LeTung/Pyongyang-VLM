@@ -49,12 +49,16 @@ class EmbeddingCache:
         dtype: str = "fp16",
         device: str = "cuda",
         storage: str = "memory",
+        allow_cpu_fallback: bool = False,
     ) -> None:
         if storage != "memory":
             raise NotImplementedError("Only in-memory embedding cache is implemented.")
         self.enabled = enabled
         self.dtype = dtype
-        self.device = self._resolve_device(device)
+        self.device = self._resolve_device(
+            device,
+            allow_cpu_fallback=allow_cpu_fallback,
+        )
         self.storage = storage
         self._items: dict[CacheKey, CachedChunkEmbeddings] = {}
 
@@ -122,9 +126,15 @@ class EmbeddingCache:
         return embeddings.detach().to(device=self.device, dtype=target_dtype).contiguous()
 
     @staticmethod
-    def _resolve_device(device: str) -> torch.device:
+    def _resolve_device(device: str, *, allow_cpu_fallback: bool = False) -> torch.device:
         if device.startswith("cuda") and not torch.cuda.is_available():
-            logger.warning("CUDA cache requested but unavailable; using CPU cache.")
+            message = (
+                "CUDA was requested but torch.cuda.is_available() is False. "
+                "Use --device cpu or pass --allow-cpu-fallback."
+            )
+            if not allow_cpu_fallback:
+                raise RuntimeError(message)
+            logger.warning("%s Falling back to CPU cache.", message)
             return torch.device("cpu")
         return torch.device(device)
 

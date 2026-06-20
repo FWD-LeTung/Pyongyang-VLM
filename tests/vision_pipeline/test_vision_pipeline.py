@@ -190,6 +190,40 @@ def test_pipeline_emits_payloads_and_pushes_output_queue() -> None:
     assert output_queue.get_nowait()["track_id"] == 1
 
 
+def test_pipeline_max_frames_counts_processed_frames_after_fps_sampling() -> None:
+    """The demo max frame limit should apply after FPS sampling."""
+
+    frame = np.full((100, 100, 3), 255, dtype=np.uint8)
+    config = VisionPipelineConfig(
+        reader=ReaderConfig(source="fake.mp4", mode="video", processing_fps=1.0),
+        cropper=CropperConfig(output_size=(224, 224), min_width=20, min_height=20),
+        buffer=BufferConfig(batch_size=10, lost_timeout_sec=30.0),
+    )
+    pipeline = VisionPipeline(
+        config,
+        reader=FakeReader(
+            [
+                FramePacket(frame, 0.0, 0),
+                FramePacket(frame, 0.2, 1),
+                FramePacket(frame, 1.1, 2),
+                FramePacket(frame, 2.2, 3),
+            ]
+        ),
+        detector=FakeDetector(),
+        tracker=FakePipelineTracker(),
+        cropper=PersonCropper(config.cropper),
+        buffer_manager=TrackletBufferManager(config.buffer),
+    )
+
+    pipeline.run(max_frames=2, flush_on_end=False)
+
+    assert pipeline.last_run_stats["requested_max_frames"] == 2
+    assert pipeline.last_run_stats["processed_frames"] == 2
+    assert pipeline.last_run_stats["read_frames"] == 3
+    assert pipeline.last_run_stats["skipped_frames"] == 1
+    assert pipeline.last_run_stats["stop_reason"] == "max_frames_reached"
+
+
 def make_person(track_id: int, timestamp: float) -> PersonData:
     """Build a small in-RAM crop sample for buffer tests."""
 

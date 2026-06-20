@@ -204,6 +204,44 @@ def test_pipeline_cache_reuses_chunk_embeddings_for_second_query() -> None:
     assert encoder.image_encode_calls == calls_after_first
 
 
+def test_pipeline_marks_tiny_score_margin_as_ambiguous() -> None:
+    """Near-tied tracks should be reported as ambiguous."""
+
+    pipeline = make_pipeline(encoder=CollapsedEncoder())
+    request = MatchingEngineRequest(
+        query=make_query("red shirt"),
+        tracklets=[
+            make_payload(7, ["crop-a"], [1]),
+            make_payload(3, ["crop-b"], [2]),
+        ],
+        video_id="ambiguous-video",
+    )
+
+    response = pipeline.run(request)
+
+    assert response.status == "success"
+    assert "ambiguous" in response.message
+
+
+def test_cuda_cache_fails_fast_without_explicit_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CUDA requests should not silently fall back to CPU."""
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(RuntimeError, match="CUDA was requested"):
+        EmbeddingCache(enabled=True, dtype="fp16", device="cuda")
+
+    cache = EmbeddingCache(
+        enabled=True,
+        dtype="fp16",
+        device="cuda",
+        allow_cpu_fallback=True,
+    )
+    assert cache.device.type == "cpu"
+
+
 class FakeEncoder:
     """Deterministic retrieval encoder for CPU pipeline tests."""
 
@@ -227,6 +265,20 @@ class FakeEncoder:
         else:
             vector = torch.tensor([0.0, 0.0, 1.0])
         return F.normalize(vector, dim=0)
+
+
+class CollapsedEncoder:
+    """Encoder that intentionally collapses all inputs to test diagnostics."""
+
+    def encode_text(self, texts: Sequence[str]) -> torch.Tensor:
+        return torch.stack([self._embedding() for _text in texts], dim=0)
+
+    def encode_images(self, images: Sequence[Any]) -> torch.Tensor:
+        return torch.stack([self._embedding() for _image in images], dim=0)
+
+    @staticmethod
+    def _embedding() -> torch.Tensor:
+        return torch.tensor([1.0, 0.0, 0.0])
 
 
 def make_pipeline(encoder: FakeEncoder | None = None) -> MatchingEnginePipeline:

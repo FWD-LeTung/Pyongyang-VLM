@@ -1,5 +1,6 @@
 .venv
 .env
+.claude
 .agents
 .codex
 .pytest_cache

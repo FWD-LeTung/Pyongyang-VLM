@@ -72,6 +72,7 @@ class MatchingEnginePipeline:
         checkpoint_path: str | Path | None = None,
         device: str | None = None,
         precision: str | None = None,
+        allow_cpu_fallback: bool = False,
     ) -> "MatchingEnginePipeline":
         """Create a TBPS-CLIP backed pipeline from YAML config."""
 
@@ -85,6 +86,12 @@ class MatchingEnginePipeline:
                 precision=str(precision or retrieval.precision),
             )
             config = replace(config, retrieval=retrieval)
+        cache = replace(
+            config.cache,
+            device=retrieval.device,
+            dtype="fp16" if retrieval.precision == "fp16" else "fp32",
+        )
+        config = replace(config, cache=cache)
         if retrieval.backend != "tbps_clip":
             raise ValueError(f"Unsupported retrieval backend: {retrieval.backend}")
 
@@ -97,8 +104,21 @@ class MatchingEnginePipeline:
             device=retrieval.device,
             precision=retrieval.precision,
             batch_size=config.runtime.encode_batch_size,
+            allow_cpu_fallback=allow_cpu_fallback,
         )
-        return cls(encoder=encoder, config=config)
+        cache_instance = EmbeddingCache(
+            enabled=config.cache.enabled,
+            dtype=config.cache.dtype,
+            device=config.cache.device,
+            storage=config.cache.storage,
+            allow_cpu_fallback=allow_cpu_fallback,
+        )
+        logger.info(
+            "cache_device=%s precision=%s",
+            cache_instance.device,
+            config.cache.dtype,
+        )
+        return cls(encoder=encoder, config=config, cache=cache_instance)
 
     def run(self, request: MatchingEngineRequest) -> MatchingEngineResponse:
         """Run production matching and return a ranked track-level response."""
@@ -184,6 +204,33 @@ class MatchingEnginePipeline:
             ranking[0].track_id,
         )
         selected_track = self._selected_timeline(selected_candidate)
+        diagnostics = self._score_diagnostics(ranking)
+        if diagnostics["is_ambiguous"]:
+            message = "Matched, but result is ambiguous: top1-top2 margin is too small."
+            logger.warning(
+                "AMBIGUOUS MATCH: top1-top2 margin below threshold. "
+                "top1_score=%.6f top2_score=%.6f top1_top2_margin=%.6f "
+                "score_range=%.6f score_std=%.6f is_ambiguous=%s",
+                diagnostics["top1_score"],
+                diagnostics["top2_score"],
+                diagnostics["top1_top2_margin"],
+                diagnostics["score_range"],
+                diagnostics["score_std"],
+                diagnostics["is_ambiguous"],
+            )
+        else:
+            message = "Matched query to track_id using temporal chunk evidence."
+            logger.info(
+                "Score diagnostics: top1_score=%.6f top2_score=%.6f "
+                "top1_top2_margin=%.6f score_range=%.6f score_std=%.6f "
+                "is_ambiguous=%s",
+                diagnostics["top1_score"],
+                diagnostics["top2_score"],
+                diagnostics["top1_top2_margin"],
+                diagnostics["score_range"],
+                diagnostics["score_std"],
+                diagnostics["is_ambiguous"],
+            )
         cache_time = query_start - cache_start
         build_time = cache_start - build_start
         total_time = perf_counter() - total_start
@@ -211,7 +258,7 @@ class MatchingEnginePipeline:
             ranking=ranking,
             selected_track=selected_track,
             status="success",
-            message="Matched query to track_id using temporal chunk evidence.",
+            message=message,
         )
 
     def _get_or_encode_chunk(
@@ -322,6 +369,31 @@ class MatchingEnginePipeline:
         if total_images < self.config.candidate.min_total_images:
             return False
         return total_chunks_with_images >= self.config.candidate.min_total_chunks
+
+    def _score_diagnostics(self, ranking: list[TrackletMatchResult]) -> dict[str, float | bool]:
+        scores = [float(result.score) for result in ranking]
+        top1 = scores[0] if scores else 0.0
+        top2 = scores[1] if len(scores) > 1 else 0.0
+        margin = top1 - top2 if len(scores) > 1 else top1
+        score_range = (max(scores) - min(scores)) if scores else 0.0
+        if len(scores) > 1:
+            mean = sum(scores) / len(scores)
+            variance = sum((score - mean) ** 2 for score in scores) / len(scores)
+            score_std = variance**0.5
+        else:
+            score_std = 0.0
+        is_ambiguous = (
+            len(scores) > 1
+            and margin < self.config.confidence.ambiguous_margin_threshold
+        )
+        return {
+            "top1_score": top1,
+            "top2_score": top2,
+            "top1_top2_margin": margin,
+            "score_range": score_range,
+            "score_std": score_std,
+            "is_ambiguous": is_ambiguous,
+        }
 
     @staticmethod
     def _candidate_by_track_id(

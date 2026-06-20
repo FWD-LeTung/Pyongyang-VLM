@@ -29,6 +29,9 @@ track_scoring:
   top_chunks: 5
   aggregation: "top_chunks_mean"
 
+confidence:
+  ambiguous_margin_threshold: 0.005
+
 runtime:
   encode_batch_size: 32
 
