@@ -12,6 +12,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.demo_pipeline.query_index import query_video_index
+from src.demo_pipeline.track_stitching import (
+    merge_track_timelines,
+    suggest_related_tracks,
+)
 from src.demo_pipeline.video_renderer import get_track_timeline, render_track_video
 from src.matching_engine.schema import QueryUnderstandingPayload
 
@@ -34,6 +38,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hold-frames", type=int, default=15)
     parser.add_argument("--min-score", type=float, default=0.28)
     parser.add_argument("--min-margin", type=float, default=0.02)
+    parser.add_argument(
+        "--auto-stitch",
+        action="store_true",
+        help="Conservatively stitch fragmented tracks around the best match.",
+    )
+    parser.add_argument("--stitch-max-gap-frames", type=int, default=300)
+    parser.add_argument("--stitch-min-appearance", type=float, default=0.78)
+    parser.add_argument("--stitch-min-margin", type=float, default=0.05)
+    parser.add_argument("--stitch-max-overlap", type=int, default=12)
+    parser.add_argument("--stitch-max-tracks", type=int, default=3)
     parser.add_argument(
         "--force-render",
         action="store_true",
@@ -63,6 +77,12 @@ def main() -> int:
         margin = float(result["top1_top2_margin"])
         low_confidence = best_score < args.min_score or margin < args.min_margin
         status = "low_confidence" if low_confidence else "accepted"
+        stitching_summary = {
+            "auto_stitch": bool(args.auto_stitch),
+            "render_track_ids": [int(best_track_id)],
+            "stitched_tracks": [],
+            "stitch_candidates": [],
+        }
 
         data = result["index_data"]
         raw_video_path = args.video or data.get("video_path")
@@ -85,11 +105,37 @@ def main() -> int:
                     output_path=output_path,
                     hold_frames=args.hold_frames,
                     saved=False,
+                    stitching_summary=stitching_summary,
                 )
                 print("Match confidence is low. Use --force-render to render anyway.")
                 return 0
 
-        timeline = get_track_timeline(data, int(best_track_id))
+        if args.auto_stitch:
+            related_tracks = suggest_related_tracks(
+                index_data=data,
+                target_track_id=int(best_track_id),
+                query_ranking=result["ranking"],
+                max_gap_frames=args.stitch_max_gap_frames,
+                min_appearance_score=args.stitch_min_appearance,
+                min_candidate_margin=args.stitch_min_margin,
+                max_overlap_frames=args.stitch_max_overlap,
+                max_related_tracks=args.stitch_max_tracks,
+            )
+            related_track_ids = [int(item["track_id"]) for item in related_tracks]
+            render_track_ids = related_track_ids + [int(best_track_id)]
+            timeline = (
+                merge_track_timelines(index_data=data, track_ids=render_track_ids)
+                if related_track_ids
+                else get_track_timeline(data, int(best_track_id))
+            )
+            stitching_summary = {
+                "auto_stitch": True,
+                "render_track_ids": render_track_ids,
+                "stitched_tracks": related_track_ids,
+                "stitch_candidates": related_tracks,
+            }
+        else:
+            timeline = get_track_timeline(data, int(best_track_id))
         render_track_video(
             video_path=video_path,
             output_path=output_path,
@@ -106,6 +152,7 @@ def main() -> int:
             output_path=output_path,
             hold_frames=args.hold_frames,
             saved=output_path.exists(),
+            stitching_summary=stitching_summary,
         )
         return 0
     except Exception as exc:
@@ -122,6 +169,7 @@ def print_summary(
     output_path: Path,
     hold_frames: int,
     saved: bool,
+    stitching_summary: dict[str, Any],
 ) -> None:
     query_payload: QueryUnderstandingPayload = result["query_payload"]
 
@@ -143,6 +191,26 @@ def print_summary(
     print(f"output: {output_path}")
     print(f"hold_frames: {hold_frames}")
     print(f"saved: {saved}")
+
+    print("\n=== Stitching ===")
+    print(f"auto_stitch: {stitching_summary['auto_stitch']}")
+    print(f"render_track_ids: {stitching_summary['render_track_ids']}")
+    stitched_tracks = stitching_summary["stitched_tracks"]
+    print(f"stitched_tracks: {stitched_tracks if stitched_tracks else 'none'}")
+    stitch_candidates = stitching_summary["stitch_candidates"]
+    if stitch_candidates:
+        print("stitch_candidates:")
+        for candidate in stitch_candidates:
+            print(
+                "- track_id="
+                f"{candidate['track_id']} "
+                f"appearance={float(candidate['appearance_score']):.6f} "
+                f"gap={candidate['gap_frames']} "
+                f"direction={candidate['direction']} "
+                f"reason={candidate['reason']}"
+            )
+    else:
+        print("stitch_candidates: none")
 
 
 if __name__ == "__main__":

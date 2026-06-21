@@ -17,6 +17,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.demo_pipeline.query_index import query_video_index
+from src.demo_pipeline.track_stitching import (
+    merge_track_timelines,
+    suggest_related_tracks,
+)
 from src.demo_pipeline.video_indexing import build_video_index, resolve_device
 from src.demo_pipeline.video_renderer import get_track_timeline, render_track_video
 
@@ -27,7 +31,34 @@ DEFAULT_CHECKPOINT = "weights/checkpoint_best.pth"
 DEFAULT_MAX_FRAMES = 0
 DEFAULT_SCORE_TOPK = 5
 DEFAULT_HOLD_FRAMES = 15
+DEFAULT_AUTO_STITCH = True
+DEFAULT_STITCH_MAX_GAP_FRAMES = 300
+DEFAULT_STITCH_MIN_APPEARANCE = 0.78
+DEFAULT_STITCH_MIN_MARGIN = 0.05
+DEFAULT_STITCH_MAX_OVERLAP = 12
+DEFAULT_STITCH_MAX_TRACKS = 3
 SESSION_ROOT = Path("outputs/gradio_sessions")
+
+BUTTON_BUSY_CSS = """
+.busy-button button:disabled::before {
+  animation: busy-spin 0.8s linear infinite;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  border-right-color: transparent;
+  content: "";
+  display: inline-block;
+  height: 0.85em;
+  margin-right: 0.5em;
+  vertical-align: -0.12em;
+  width: 0.85em;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+"""
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +119,12 @@ def search_and_render(
     index_data: dict[str, Any] | None,
     video_path: str | None,
     session_dir: str | None,
+    auto_stitch: bool,
+    stitch_max_gap_frames: int | float | None,
+    stitch_min_appearance: int | float | None,
+    stitch_min_margin: int | float | None,
+    stitch_max_overlap: int | float | None,
+    stitch_max_tracks: int | float | None,
 ) -> tuple[str, str | None]:
     if index_data is None:
         return "Please process a video first.", None
@@ -113,6 +150,9 @@ def search_and_render(
             return "No ranked track was produced by query_video_index().", None
 
         best_score = float(result["best_score"])
+        stitch_enabled = bool(auto_stitch)
+        related_tracks: list[dict[str, Any]] = []
+        render_track_ids = [int(best_track_id)]
 
         raw_video_path = video_path or index_data.get("video_path")
         if not raw_video_path:
@@ -122,7 +162,42 @@ def search_and_render(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / "rendered_result.mp4"
 
-        timeline = get_track_timeline(index_data, int(best_track_id))
+        if stitch_enabled:
+            related_tracks = suggest_related_tracks(
+                index_data=index_data,
+                target_track_id=int(best_track_id),
+                query_ranking=result["ranking"],
+                max_gap_frames=int_control_value(
+                    stitch_max_gap_frames,
+                    DEFAULT_STITCH_MAX_GAP_FRAMES,
+                ),
+                min_appearance_score=float_control_value(
+                    stitch_min_appearance,
+                    DEFAULT_STITCH_MIN_APPEARANCE,
+                ),
+                min_candidate_margin=float_control_value(
+                    stitch_min_margin,
+                    DEFAULT_STITCH_MIN_MARGIN,
+                ),
+                max_overlap_frames=int_control_value(
+                    stitch_max_overlap,
+                    DEFAULT_STITCH_MAX_OVERLAP,
+                ),
+                max_related_tracks=int_control_value(
+                    stitch_max_tracks,
+                    DEFAULT_STITCH_MAX_TRACKS,
+                ),
+            )
+            related_track_ids = [int(item["track_id"]) for item in related_tracks]
+            render_track_ids = related_track_ids + [int(best_track_id)]
+            timeline = (
+                merge_track_timelines(index_data=index_data, track_ids=render_track_ids)
+                if related_track_ids
+                else get_track_timeline(index_data, int(best_track_id))
+            )
+        else:
+            timeline = get_track_timeline(index_data, int(best_track_id))
+
         rendered_path = render_track_video(
             video_path=source_video,
             output_path=output_path,
@@ -140,9 +215,25 @@ def search_and_render(
             best_track_id=int(best_track_id),
             decision="rendered",
             output_path=rendered_path,
+            stitching_summary={
+                "auto_stitch": stitch_enabled,
+                "render_track_ids": render_track_ids,
+                "stitched_tracks": [
+                    int(item["track_id"]) for item in related_tracks
+                ],
+                "stitch_candidates": related_tracks,
+            },
         ),
         str(rendered_path),
     )
+
+
+def int_control_value(value: int | float | None, default: int) -> int:
+    return default if value is None else int(value)
+
+
+def float_control_value(value: int | float | None, default: float) -> float:
+    return default if value is None else float(value)
 
 
 def copy_uploaded_video(uploaded_video: Any, session_dir: Path) -> Path:
@@ -196,6 +287,7 @@ def format_query_summary(
     best_track_id: int,
     decision: str,
     output_path: Path,
+    stitching_summary: dict[str, Any],
 ) -> str:
     query_payload = result["query_payload"]
     warnings = result.get("warnings", [])
@@ -217,7 +309,31 @@ def format_query_summary(
         "",
         f"- output: `{output_path}`",
         f"- hold_frames: `{DEFAULT_HOLD_FRAMES}`",
+        "",
+        "### Stitching",
+        "",
+        f"- auto_stitch: `{stitching_summary['auto_stitch']}`",
+        f"- render_track_ids: `{stitching_summary['render_track_ids']}`",
+        "- stitched_tracks: "
+        f"`{stitching_summary['stitched_tracks'] or 'none'}`",
     ]
+    stitch_candidates = stitching_summary["stitch_candidates"]
+    if stitch_candidates:
+        lines.extend(
+            [
+                "",
+                "### Stitch Candidates",
+                "",
+            ]
+        )
+        for candidate in stitch_candidates:
+            lines.append(
+                "- track_id="
+                f"`{candidate['track_id']}` "
+                f"appearance_score=`{float(candidate['appearance_score']):.6f}` "
+                f"gap_frames=`{candidate['gap_frames']}` "
+                f"direction=`{candidate['direction']}`"
+            )
     if warnings:
         lines.extend(["", "### Warnings", ""])
         lines.extend(f"- {warning}" for warning in warnings)
@@ -246,7 +362,11 @@ def create_demo() -> gr.Blocks:
                 choices=["fp32", "fp16"],
                 value=initial_precision,
             )
-            process_button = gr.Button("Process Video", variant="primary")
+            process_button = gr.Button(
+                "Process Video",
+                variant="primary",
+                elem_classes="busy-button",
+            )
             index_status = gr.Markdown()
 
         with gr.Tab("2. Search & Render"):
@@ -255,11 +375,49 @@ def create_demo() -> gr.Blocks:
                 lines=3,
                 placeholder="Describe the person to retrieve.",
             )
-            search_button = gr.Button("Search & Render", variant="primary")
+            with gr.Accordion("Track Stitching", open=True):
+                auto_stitch_input = gr.Checkbox(
+                    label="Auto stitch fragmented tracks",
+                    value=DEFAULT_AUTO_STITCH,
+                )
+                stitch_max_gap_frames_input = gr.Number(
+                    label="stitch_max_gap_frames",
+                    value=DEFAULT_STITCH_MAX_GAP_FRAMES,
+                    precision=0,
+                )
+                stitch_min_appearance_input = gr.Number(
+                    label="stitch_min_appearance",
+                    value=DEFAULT_STITCH_MIN_APPEARANCE,
+                )
+                stitch_min_margin_input = gr.Number(
+                    label="stitch_min_margin",
+                    value=DEFAULT_STITCH_MIN_MARGIN,
+                )
+                stitch_max_overlap_input = gr.Number(
+                    label="stitch_max_overlap",
+                    value=DEFAULT_STITCH_MAX_OVERLAP,
+                    precision=0,
+                )
+                stitch_max_tracks_input = gr.Number(
+                    label="stitch_max_tracks",
+                    value=DEFAULT_STITCH_MAX_TRACKS,
+                    precision=0,
+                )
+            search_button = gr.Button(
+                "Search & Render",
+                variant="primary",
+                elem_classes="busy-button",
+            )
             result_summary = gr.Markdown()
             output_video = gr.Video(label="Rendered video")
 
-        process_button.click(
+        process_start = process_button.click(
+            fn=lambda: set_button_busy("Processing Video"),
+            inputs=[],
+            outputs=process_button,
+            queue=False,
+        )
+        process_run = process_start.then(
             fn=process_video,
             inputs=[
                 video_input,
@@ -272,7 +430,26 @@ def create_demo() -> gr.Blocks:
                 session_dir_state,
             ],
         )
-        search_button.click(
+        process_run.then(
+            fn=lambda: set_button_ready("Process Video"),
+            inputs=[],
+            outputs=process_button,
+            queue=False,
+        )
+        process_run.failure(
+            fn=lambda: set_button_ready("Process Video"),
+            inputs=[],
+            outputs=process_button,
+            queue=False,
+        )
+
+        search_start = search_button.click(
+            fn=lambda: set_button_busy("Searching & Rendering"),
+            inputs=[],
+            outputs=search_button,
+            queue=False,
+        )
+        search_run = search_start.then(
             fn=search_and_render,
             inputs=[
                 query_input,
@@ -280,11 +457,37 @@ def create_demo() -> gr.Blocks:
                 index_data_state,
                 video_path_state,
                 session_dir_state,
+                auto_stitch_input,
+                stitch_max_gap_frames_input,
+                stitch_min_appearance_input,
+                stitch_min_margin_input,
+                stitch_max_overlap_input,
+                stitch_max_tracks_input,
             ],
             outputs=[result_summary, output_video],
         )
+        search_run.then(
+            fn=lambda: set_button_ready("Search & Render"),
+            inputs=[],
+            outputs=search_button,
+            queue=False,
+        )
+        search_run.failure(
+            fn=lambda: set_button_ready("Search & Render"),
+            inputs=[],
+            outputs=search_button,
+            queue=False,
+        )
 
     return demo
+
+
+def set_button_busy(label: str) -> Any:
+    return gr.update(value=label, interactive=False)
+
+
+def set_button_ready(label: str) -> Any:
+    return gr.update(value=label, interactive=True)
 
 
 def main() -> None:
@@ -295,6 +498,7 @@ def main() -> None:
         server_name=args.server_name,
         server_port=args.server_port,
         share=args.share,
+        css=BUTTON_BUSY_CSS,
     )
 
 
