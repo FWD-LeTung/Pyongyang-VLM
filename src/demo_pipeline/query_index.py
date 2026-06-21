@@ -18,7 +18,8 @@ from src.query_understanding.schema import QueryUnderstandingResponse
 
 def query_video_index(
     *,
-    index_path: str | Path,
+    index_path: str | Path | None = None,
+    index_data: dict[str, Any] | None = None,
     raw_query: str,
     matching_config: str = "config/matching_engine.yaml",
     checkpoint: str | None = None,
@@ -26,10 +27,17 @@ def query_video_index(
     precision: str = "fp32",
     score_topk: int = 3,
 ) -> dict[str, Any]:
-    """Run Module 1 + text retrieval against a saved video embedding index."""
+    """Run Module 1 + text retrieval against a saved or in-memory video index."""
 
     resolved_device = resolve_device(device)
-    data = load_index(Path(index_path))
+    if index_data is not None:
+        data = index_data
+        validate_index(data)
+    elif index_path is not None:
+        data = load_index(Path(index_path))
+    else:
+        raise ValueError("Either index_path or index_data must be provided.")
+
     warnings = warn_if_config_differs(
         matching_config=matching_config,
         checkpoint=checkpoint,
