@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VLM-LLM để tìm kiếm người</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00509d;
+      --primary-dark: #003f7d;
+      --secondary: #f4d35e;
+      --accent: #f95738;
+      --text-main: #1a1a1a;
+      --text-muted: #666;
+      --bg-light: #f8f9fa;
+      --white: #ffffff;
+      --border: #ececec;
+      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Inter", sans-serif;
+      background: #e2e8f0;
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .slide {
+      width: 1280px;
+      height: 720px;
+      background: var(--white);
+      display: none;
+      flex-direction: column;
+      position: relative;
+      padding: 58px 78px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+    }
+
+    .slide.active { display: flex; animation: slideIn 0.5s ease-out; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(15px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .slide::after {
+      content: attr(data-page);
+      position: absolute;
+      right: 42px;
+      bottom: 30px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      color: #9aa4b2;
+    }
+
+    .slide-title {
+      font-size: 54px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      margin-bottom: 22px;
+      line-height: 1.1;
+      max-width: 1060px;
+    }
+
+    .blue { color: var(--primary); }
+
+    .section-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    .slide-subtitle {
+      font-size: 22px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      max-width: 880px;
+    }
+
+    .content-area { flex: 1; margin-top: 18px; }
+
+    .divider-slide {
+      background: var(--primary);
+      color: var(--white);
+      text-align: center;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 38px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      background: var(--bg-light);
+      transition: var(--transition);
+      height: 100%;
+    }
+
+    .card h3 { font-size: 23px; margin-bottom: 14px; color: var(--primary); }
+    .card p { color: var(--text-muted); font-size: 18px; line-height: 1.45; }
+    .card ul { list-style: none; }
+    .card li { margin-bottom: 10px; font-size: 17px; line-height: 1.35; position: relative; padding-left: 20px; }
+    .card li::before { content: "•"; color: var(--primary); position: absolute; left: 0; font-weight: bold; }
+
+    .feature-item {
+      font-size: 24px;
+      padding: 18px 24px;
+      border-left: 5px solid var(--primary);
+      background: #f0f7ff;
+      margin-bottom: 16px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .hero-title {
+      font-size: 70px;
+      font-weight: 900;
+      letter-spacing: -3px;
+      line-height: 1.02;
+      max-width: 860px;
+      margin-bottom: 28px;
+    }
+
+    .hero-wrap {
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 44px;
+      align-items: center;
+      height: 100%;
+    }
+
+    .hero-visual {
+      position: relative;
+      height: 480px;
+      border-radius: 26px;
+      background: linear-gradient(145deg, #f0f7ff 0%, #ffffff 56%, #fff5d1 100%);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .camera-frame {
+      position: absolute;
+      inset: 44px 44px 120px 44px;
+      border: 4px solid var(--primary);
+      border-radius: 18px;
+      background:
+        linear-gradient(90deg, rgba(0,80,157,0.07) 1px, transparent 1px),
+        linear-gradient(rgba(0,80,157,0.07) 1px, transparent 1px);
+      background-size: 34px 34px;
+    }
+
+    .person {
+      position: absolute;
+      width: 86px;
+      height: 210px;
+      bottom: 36px;
+      left: 168px;
+    }
+
+    .person .head {
+      width: 54px;
+      height: 54px;
+      background: #ffd5bd;
+      border: 4px solid var(--primary-dark);
+      border-radius: 50%;
+      margin: 0 auto 8px;
+    }
+
+    .person .body {
+      width: 86px;
+      height: 92px;
+      background: var(--accent);
+      border: 4px solid var(--primary-dark);
+      border-radius: 22px 22px 12px 12px;
+    }
+
+    .person .legs {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .person .legs span {
+      display: block;
+      width: 25px;
+      height: 64px;
+      background: #27364a;
+      border: 4px solid var(--primary-dark);
+      border-top: 0;
+      border-radius: 0 0 10px 10px;
+    }
+
+    .query-bubble {
+      position: absolute;
+      right: 34px;
+      bottom: 34px;
+      width: 330px;
+      padding: 22px;
+      border-radius: 18px;
+      background: var(--white);
+      border: 2px solid var(--primary);
+      box-shadow: 0 12px 28px rgba(0,80,157,0.15);
+      font-size: 19px;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+
+    .pill-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+    .pill {
+      border: 1px solid #c7ddf5;
+      color: var(--primary-dark);
+      background: #f0f7ff;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .compare-card {
+      min-height: 230px;
+      position: relative;
+    }
+
+    .compare-card .tag {
+      display: inline-block;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: var(--white);
+      background: var(--primary);
+      border-radius: 999px;
+      padding: 6px 10px;
+      margin-bottom: 18px;
+    }
+
+    .challenge-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .challenge {
+      padding: 22px;
+      border-radius: 18px;
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      min-height: 142px;
+    }
+
+    .challenge strong {
+      display: block;
+      color: var(--primary);
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .challenge span {
+      color: var(--text-muted);
+      font-size: 17px;
+      line-height: 1.4;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      position: relative;
+      padding-top: 22px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 62px;
+      left: 42px;
+      right: 42px;
+      height: 4px;
+      background: #d7e8f8;
+    }
+
+    .milestone {
+      position: relative;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 72px 18px 20px;
+      min-height: 306px;
+    }
+
+    .milestone::before {
+      content: "";
+      position: absolute;
+      top: 30px;
+      left: 22px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 0 8px #f0f7ff;
+    }
+
+    .milestone .year {
+      font-family: "JetBrains Mono", monospace;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .milestone h3 {
+      color: var(--primary-dark);
+      font-size: 20px;
+      margin-bottom: 10px;
+      line-height: 1.2;
+    }
+
+    .milestone p {
+      color: var(--text-muted);
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .model-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+    }
+
+    .model-box {
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      border-top: 6px solid var(--primary);
+      border-radius: 18px;
+      padding: 20px 18px;
+      min-height: 300px;
+    }
+
+    .model-box h3 {
+      font-size: 22px;
+      color: var(--primary);
+      margin-bottom: 14px;
+    }
+
+    .model-box p {
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .dataset-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      font-size: 18px;
+    }
+
+    .dataset-table th {
+      background: var(--primary);
+      color: var(--white);
+      text-align: left;
+      padding: 16px 18px;
+    }
+
+    .dataset-table td {
+      border-bottom: 1px solid var(--border);
+      padding: 15px 18px;
+      color: var(--text-muted);
+    }
+
+    .dataset-table td:first-child {
+      color: var(--primary-dark);
+      font-weight: 800;
+    }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .flow-step {
+      flex: 1 1 130px;
+      min-height: 104px;
+      border: 1px solid #c7ddf5;
+      background: #f0f7ff;
+      border-radius: 16px;
+      padding: 16px;
+      position: relative;
+    }
+
+    .flow-step small {
+      display: block;
+      font-family: "JetBrains Mono", monospace;
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .flow-step strong {
+      display: block;
+      color: var(--primary-dark);
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .note {
+      margin-top: 24px;
+      padding: 20px 24px;
+      background: #fff8dd;
+      border-left: 5px solid var(--secondary);
+      border-radius: 14px;
+      font-size: 21px;
+      line-height: 1.42;
+      color: #4c4324;
+      font-weight: 600;
+    }
+
+    .split-title {
+      font-size: 26px;
+      color: var(--primary);
+      font-weight: 800;
+      margin-bottom: 16px;
+    }
+
+    .check-list {
+      list-style: none;
+      display: grid;
+      gap: 14px;
+    }
+
+    .check-list li {
+      font-size: 21px;
+      line-height: 1.35;
+      padding: 16px 18px 16px 54px;
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      position: relative;
+    }
+
+    .check-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 18px;
+      top: 15px;
+      color: var(--white);
+      background: var(--primary);
+      border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 16px;
+    }
+
+    .speaker-note {
+      position: absolute;
+      left: 78px;
+      right: 78px;
+      bottom: 26px;
+      color: #8a94a3;
+      font-size: 14px;
+      line-height: 1.35;
+      padding-right: 70px;
+    }
+
+    .controls {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 10;
+    }
+
+    .controls button {
+      border: 0;
+      background: var(--primary);
+      color: var(--white);
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      font-size: 22px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(0,80,157,0.25);
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 5px;
+      background: var(--accent);
+      width: 0;
+      z-index: 20;
+      transition: width 0.25s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+
+  <section class="slide active" data-page="01/13">
+    <div class="hero-wrap">
+      <div>
+        <span class="section-label">Tiêu đề</span>
+        <h1 class="hero-title">Sử dụng <span class="blue">VLM-LLM</span> để tìm kiếm người</h1>
+        <p class="slide-subtitle">Bài toán tìm kiếm người không chỉ là nhận diện bằng ảnh, mà là tìm một người trong tập ảnh hoặc video dựa trên mô tả ngôn ngữ tự nhiên.</p>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <div class="camera-frame">
+          <div class="person">
+            <div class="head"></div>
+            <div class="body"></div>
+            <div class="legs"><span></span><span></span></div>
+          </div>
+        </div>
+        <div class="query-bubble">"người mặc áo đỏ, đeo ba lô đen, đi giày trắng"</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-page="02/13">
+    <span class="section-label">Động lực bài toán</span>
+    <h2 class="slide-title">Vì sao cần tìm người bằng <span class="blue">mô tả?</span></h2>
+    <div class="content-area grid-3">
+      <div class="card compare-card">
+        <span class="tag">THỰC TẾ</span>
+        <h3>Không phải lúc nào cũng có ảnh mẫu</h3>
+        <p>Trong tình huống nhân chứng hoặc an ninh, đầu vào thường chỉ là mô tả bằng lời.</p>
+      </div>
+      <div class="card compare-card">
+        <span class="tag">TƯƠNG TÁC</span>
+        <h3>Ngôn ngữ tự nhiên gần với con người</h3>
+        <p>Người dùng có thể mô tả trang phục, phụ kiện, dáng người hoặc hành động.</p>
+      </div>
+    </div>
+    <p class="speaker-note">Lời nói: Điểm quan trọng là chuyển từ tìm bằng ảnh sang tìm bằng mô tả, gần hơn với cách con người ghi nhớ và trao đổi thông tin.</p>
+  </section>
+
+  <section class="slide" data-page="03/13">
+    <span class="section-label">Person Retrieval</span>
+    <h2 class="slide-title">TBPR nằm ở đâu trong bài toán <span class="blue">tìm kiếm người?</span></h2>
+    <div class="content-area grid-4">
+      <div class="card">
+        <h3>Image-based Re-ID</h3>
+        <ul>
+          <li>Query là ảnh người</li>
+          <li>Đối khớp visual-to-visual</li>
+          <li>Cần ảnh mẫu chất lượng tốt</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Attribute-based</h3>
+        <ul>
+          <li>Query là nhãn cố định</li>
+          <li>Ví dụ: giới tính, màu áo</li>
+          <li>Bị giới hạn bởi bộ nhãn</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Text-based Retrieval</h3>
+        <ul>
+          <li>Query là câu mô tả</li>
+          <li>Đối khớp cross-modal</li>
+          <li>Linh hoạt nhưng khó hơn</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Sketch-based Re-ID</h3>
+        <ul>
+          <li>Query là hình phác thảo</li>
+          <li>Cần chuyển miền nét vẽ sang ảnh</li>
+          <li>Phụ thuộc kỹ năng vẽ</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note">TBPR linh hoạt hơn attribute-based search.</div>
+  </section>
+
+  <section class="slide" data-page="04/13">
+    <span class="section-label">Thách thức cốt lõi</span>
+    <h2 class="slide-title">Thách thức cốt lõi: <span class="blue">modality gap</span></h2>
+    <div class="content-area challenge-list">
+      <div class="challenge"><strong>Ảnh trực quan</strong><span>Chứa màu sắc, ánh sáng, góc nhìn, vật cản và nhiều nhiễu môi trường.</span></div>
+      <div class="challenge"><strong>Văn bản trừu tượng</strong><span>Phụ thuộc vào cách người mô tả ghi nhớ, chọn từ và diễn đạt.</span></div>
+      <div class="challenge"><strong>Mất cân đối thông tin</strong><span>Một câu ngắn không thể bao phủ mọi chi tiết trong ảnh người.</span></div>
+      <div class="challenge"><strong>Không gian nhúng chung</strong><span>Cần đưa embedding ảnh và text vào cùng không gian để so sánh trực tiếp.</span></div>
+    </div>
+    <div class="note">Cốt lõi kỹ thuật: Image Encoder + Text Encoder → joint embedding space → cosine similarity / ranking.</div>
+  </section>
+
+  <section class="slide" data-page="05/13">
+    <span class="section-label">Tiến hóa kỹ thuật</span>
+    <h2 class="slide-title">Tiến hóa kỹ thuật của <span class="blue">TBPR</span></h2>
+    <div class="content-area timeline">
+      <div class="milestone">
+        <div class="year">Trước 2017</div>
+        <h3>Attribute Search</h3>
+        <p>Tìm kiếm dựa trên các thuộc tính được định nghĩa trước.</p>
+      </div>
+      <div class="milestone">
+        <div class="year">2017</div>
+        <h3>CUHK-PEDES</h3>
+        <p>GNA-RNN và dataset quy mô lớn đưa TBPR thành bài toán độc lập.</p>
+      </div>
+      <div class="milestone">
+        <div class="year">2018-2021</div>
+        <h3>Attention + BERT</h3>
+        <p>CNN/RNN, BERT và fine-grained alignment giúp hiểu chi tiết hơn.</p>
+      </div>
+      <div class="milestone">
+        <div class="year">2022-2024</div>
+        <h3>CLIP / VLP</h3>
+        <p>Tận dụng tiền huấn luyện ảnh-văn bản để tăng hiệu quả mạnh.</p>
+      </div>
+      <div class="milestone">
+        <div class="year">2025-2026</div>
+        <h3>MLLM + ChatPR</h3>
+        <p>Chuyển sang truy vấn hội thoại, làm giàu chú thích và tương tác.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-page="06/13">
+    <span class="section-label">Các hướng mô hình nổi bật</span>
+    <h2 class="slide-title">Các hướng mô hình <span class="blue">nổi bật</span></h2>
+    <div class="content-area model-strip">
+      <div class="model-box">
+        <h3>Dual Encoder</h3>
+        <p>Image encoder và text encoder tạo embedding riêng rồi so khớp trong không gian chung.</p>
+      </div>
+      <div class="model-box">
+        <h3>Fine-grained Alignment</h3>
+        <p>Căn chỉnh từ/cụm từ với vùng cơ thể, trang phục và phụ kiện.</p>
+      </div>
+      <div class="model-box">
+        <h3>CLIP-based</h3>
+        <p>Tận dụng tri thức tiền huấn luyện ảnh-văn bản thay vì học từ đầu.</p>
+      </div>
+      <div class="model-box">
+        <h3>AUL</h3>
+        <p>Xử lý độ không chắc chắn và nhiễu trong các cặp ảnh-text khi huấn luyện.</p>
+      </div>
+      <div class="model-box">
+        <h3>MARS</h3>
+        <p>Tập trung vào thuộc tính và quan hệ để tránh chỉ nhìn vào chi tiết dễ thấy.</p>
+      </div>
+    </div>
+    <div class="note">Mô hình tốt cần phân biệt cả chi tiết nhỏ: phụ kiện, kiểu dáng, vị trí và quan hệ giữa các thuộc tính.</div>
+  </section>
+
+  <section class="slide" data-page="07/13">
+    <span class="section-label">Dataset và benchmark</span>
+    <h2 class="slide-title">Dataset phát triển theo hướng <span class="blue">mô tả dài hơn, chi tiết hơn</span></h2>
+    <div class="content-area">
+      <table class="dataset-table">
+        <thead>
+          <tr>
+            <th>Dataset</th>
+            <th>Năm</th>
+            <th>Đặc điểm mô tả</th>
+            <th>Ứng dụng chính</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>CUHK-PEDES</td><td>2017</td><td>2 câu/ảnh, mô tả cơ bản</td><td>Benchmark nền tảng cho TBPR</td></tr>
+          <tr><td>RSTPReid</td><td>2021</td><td>Có ánh sáng, góc nhìn camera thực tế</td><td>Đánh giá khả năng chống nhiễu</td></tr>
+          <tr><td>ICFG-PEDES</td><td>2022</td><td>Mô tả dài hơn, có nhãn phân đoạn</td><td>Căn chỉnh theo bộ phận</td></tr>
+          <tr><td>UFine6926</td><td>2024</td><td>Mô tả siêu chi tiết</td><td>Tìm kiếm hạt mịn</td></tr>
+          <tr><td>ChatPedes</td><td>2025</td><td>Dữ liệu hội thoại đa vòng</td><td>Chat-based Person Retrieval</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide" data-page="08/13">
+    <span class="section-label">Annotation-induced mismatch</span>
+    <h2 class="slide-title">Vấn đề <span class="blue">annotation-induced mismatch</span></h2>
+    <div class="content-area grid-2">
+      <div>
+        <div class="feature-item">Nhiều người có ngoại hình gần giống nhau</div>
+        <div class="feature-item">Annotator có thể viết mô tả giống nhau cho các ID khác nhau</div>
+        <div class="feature-item">Kết quả đúng về ngữ nghĩa nhưng sai ID vẫn bị tính là lỗi</div>
+      </div>
+      <div class="card">
+        <h3>Vai trò của MLLM</h3>
+        <ul>
+          <li>Phát hiện nhóm ảnh dễ nhầm lẫn</li>
+          <li>Quan sát nhiều ảnh cùng lúc để tìm điểm khác biệt</li>
+          <li>Viết lại mô tả theo hướng nhấn mạnh đặc trưng phân biệt</li>
+          <li>Giảm sai lệch khi đánh giá và huấn luyện</li>
+        </ul>
+      </div>
+    </div>
+    <p class="speaker-note">Lời nói: Lỗi không chỉ nằm ở mô hình, mà còn nằm ở cách dataset được chú thích và đánh giá.</p>
+  </section>
+
+  <section class="slide" data-page="09/13">
+    <span class="section-label">Hạn chế thực tế</span>
+    <h2 class="slide-title">Benchmark tốt chưa chắc đã <span class="blue">dùng tốt ngoài đời</span></h2>
+    <div class="content-area grid-2">
+      <div class="card">
+        <h3>Vấn đề đầu vào</h3>
+        <ul>
+          <li>Mô tả người dùng mơ hồ hoặc không nhất quán</li>
+          <li>Cùng một màu có thể được gọi bằng nhiều cách khác nhau</li>
+          <li>Truy vấn ban đầu thường thiếu thông tin phân biệt</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Vấn đề ảnh/video</h3>
+        <ul>
+          <li>Che khuất bởi đám đông hoặc vật thể</li>
+          <li>Góc nhìn xấu, motion blur, ánh sáng kém</li>
+          <li>Gallery lớn đòi hỏi tốc độ tìm kiếm cao</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note">Benchmark tốt chưa đồng nghĩa với hệ thống thực tế tốt. Project cần chọn phạm vi vừa sức.</div>
+  </section>
+
+  <section class="slide" data-page="10/13">
+    <span class="section-label">Hướng đề tài đề xuất</span>
+    <h2 class="slide-title">Hướng đề tài đề xuất</h2>
+    <p class="slide-subtitle"><strong>Nghiên cứu hệ thống tìm kiếm người bằng mô tả văn bản sử dụng VLM-LLM.</strong></p>
+    <div class="content-area grid-2">
+      <div class="card">
+        <h3>Định hướng từ tài liệu research</h3>
+        <ul>
+          <li>Lấy Text-based Person Retrieval làm bài toán trung tâm.</li>
+          <li>Sử dụng VLM/CLIP để học không gian nhúng chung giữa ảnh người và mô tả văn bản.</li>
+          <li>Tận dụng LLM/MLLM để xử lý truy vấn mơ hồ, làm giàu mô tả và hỗ trợ tương tác.</li>
+          <li>Tập trung vào modality gap, mô tả không nhất quán, che khuất, góc nhìn xấu và tốc độ tìm kiếm.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Hướng triển khai nghiên cứu</h3>
+        <ul>
+          <li>Khảo sát và so sánh TBPR truyền thống với các hướng dựa trên CLIP/VLM.</li>
+          <li>Xây dựng mô hình đối khớp ảnh-văn bản dựa trên joint embedding space.</li>
+          <li>Đánh giá trên CUHK-PEDES, RSTPReid, ICFG-PEDES hoặc UFine6926 nếu có điều kiện.</li>
+          <li>Phân tích lỗi thường gặp và đề xuất bổ sung LLM/MLLM theo hướng ChatPR.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-page="11/13">
+    <span class="section-label">Vai trò của LLM</span>
+    <h2 class="slide-title">LLM làm gì trong hệ thống?</h2>
+    <div class="content-area grid-2">
+      <ul class="check-list">
+        <li>Chuẩn hóa truy vấn người dùng</li>
+        <li>Tách thuộc tính: màu áo, quần, phụ kiện, hành động</li>
+        <li>Viết lại query rõ ràng hơn cho VLM/Text Encoder</li>
+      </ul>
+      <ul class="check-list">
+        <li>Hỏi lại khi mô tả mơ hồ: "Người đó có đeo balo không?"</li>
+        <li>Làm giàu chú thích bằng cách nhấn mạnh các đặc trưng phân biệt</li>
+        <li>Hỗ trợ hướng ChatPR với tương tác đa vòng</li>
+      </ul>
+    </div>
+    <div class="note">VLM đảm nhiệm đối khớp ảnh-text; LLM giúp giao tiếp, làm rõ truy vấn và nâng chất lượng mô tả.</div>
+  </section>
+
+  <section class="slide" data-page="12/13">
+    <span class="section-label">Phạm vi khả thi</span>
+    <h2 class="slide-title">Phạm vi khả thi cho <span class="blue">bài tập lớn</span></h2>
+    <div class="content-area grid-2">
+      <div class="card">
+        <h3>Phạm vi nên tập trung</h3>
+        <ul>
+          <li>Tìm hiểu Text-based Person Retrieval và vị trí trong Person Retrieval/Re-ID.</li>
+          <li>Trình bày image encoder, text encoder, joint embedding space và similarity ranking.</li>
+          <li>Khảo sát vai trò của CLIP/VLM trong đối khớp ảnh-văn bản.</li>
+          <li>Phân tích AUL, MARS, MLLM-based annotation refinement và ChatPR.</li>
+          <li>Đề xuất mô hình thực nghiệm ở mức prototype dựa trên CLIP/VLM nếu có điều kiện.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Mở rộng nghiên cứu nếu còn thời gian</h3>
+        <ul>
+          <li>Xử lý truy vấn mơ hồ bằng LLM.</li>
+          <li>Thử nghiệm mô tả chi tiết hơn theo hướng UFineBench.</li>
+          <li>Phân tích Text-based Occluded Person Re-ID.</li>
+          <li>Mô phỏng tương tác ChatPR: hệ thống hỏi lại để làm rõ đặc điểm phân biệt.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-page="13/13">
+    <span class="section-label">Kết luận</span>
+    <h2 class="slide-title">Kết luận</h2>
+    <div class="content-area">
+      <div class="feature-item">TBPR quan trọng vì gần với nhu cầu tìm kiếm thực tế bằng mô tả.</div>
+      <div class="feature-item">Xu hướng hiện nay là kết hợp VLM, CLIP, MLLM và tương tác hội thoại.</div>
+      <div class="feature-item">Khó khăn chính: modality gap, mô tả mơ hồ, che khuất và tốc độ.</div>
+      <div class="feature-item">Đề tài nên tập trung vào hướng VLM/CLIP cho đối khớp ảnh-văn bản, sau đó mở rộng bằng LLM/MLLM.</div>
+    </div>
+    <div class="note">Câu chốt: VLM đối khớp ảnh-văn bản; LLM hỗ trợ hiểu, chuẩn hóa và làm rõ truy vấn của người dùng.</div>
+  </section>
+
+  <div class="controls" aria-label="Slide controls">
+    <button type="button" id="prev" aria-label="Previous slide">‹</button>
+    <button type="button" id="next" aria-label="Next slide">›</button>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const progress = document.getElementById("progress");
+    let current = 0;
+
+    function showSlide(index) {
+      current = Math.max(0, Math.min(index, slides.length - 1));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === current));
+      progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+    }
+
+    document.getElementById("prev").addEventListener("click", () => showSlide(current - 1));
+    document.getElementById("next").addEventListener("click", () => showSlide(current + 1));
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") showSlide(current + 1);
+      if (event.key === "ArrowLeft" || event.key === "PageUp") showSlide(current - 1);
+      if (event.key === "Home") showSlide(0);
+      if (event.key === "End") showSlide(slides.length - 1);
+    });
+
+    showSlide(0);
+  </script>
+</body>
+</html>

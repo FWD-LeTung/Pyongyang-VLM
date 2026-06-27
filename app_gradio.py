@@ -22,7 +22,11 @@ from src.demo_pipeline.track_stitching import (
     suggest_related_tracks,
 )
 from src.demo_pipeline.video_indexing import build_video_index, resolve_device
-from src.demo_pipeline.video_renderer import get_track_timeline, render_track_video
+from src.demo_pipeline.video_renderer import (
+    RenderSegment,
+    get_track_timeline,
+    render_track_video,
+)
 
 
 DEFAULT_VISION_CONFIG = "config/vision_pipeline.yaml"
@@ -37,6 +41,8 @@ DEFAULT_STITCH_MIN_APPEARANCE = 0.78
 DEFAULT_STITCH_MIN_MARGIN = 0.05
 DEFAULT_STITCH_MAX_OVERLAP = 12
 DEFAULT_STITCH_MAX_TRACKS = 3
+DEFAULT_TRIM_SEGMENT = True
+DEFAULT_TRIM_PAD_FRAMES = 30
 SESSION_ROOT = Path("outputs/gradio_sessions")
 
 BUTTON_BUSY_CSS = """
@@ -125,6 +131,8 @@ def search_and_render(
     stitch_min_margin: int | float | None,
     stitch_max_overlap: int | float | None,
     stitch_max_tracks: int | float | None,
+    trim_segment: bool,
+    trim_pad_frames: int | float | None,
 ) -> tuple[str, str | None]:
     if index_data is None:
         return "Please process a video first.", None
@@ -198,13 +206,17 @@ def search_and_render(
         else:
             timeline = get_track_timeline(index_data, int(best_track_id))
 
-        rendered_path = render_track_video(
+        segment = render_track_video(
             video_path=source_video,
             output_path=output_path,
             track_id=int(best_track_id),
             timeline=timeline,
             score=best_score,
             hold_frames=DEFAULT_HOLD_FRAMES,
+            trim_segment=trim_segment,
+            trim_pad_frames=int_control_value(
+                trim_pad_frames, DEFAULT_TRIM_PAD_FRAMES
+            ),
         )
     except Exception as exc:
         raise gr.Error(str(exc)) from exc
@@ -214,7 +226,8 @@ def search_and_render(
             result=result,
             best_track_id=int(best_track_id),
             decision="rendered",
-            output_path=rendered_path,
+            output_path=segment.output_path,
+            segment=segment,
             stitching_summary={
                 "auto_stitch": stitch_enabled,
                 "render_track_ids": render_track_ids,
@@ -224,7 +237,7 @@ def search_and_render(
                 "stitch_candidates": related_tracks,
             },
         ),
-        str(rendered_path),
+        str(segment.output_path),
     )
 
 
@@ -281,6 +294,20 @@ def format_index_status(index_data: dict[str, Any]) -> str:
     )
 
 
+def format_segment_line(segment: RenderSegment | None) -> str:
+    """Format the render trim mode as one markdown bullet for the summary."""
+
+    if segment is not None and segment.start_frame is not None:
+        return (
+            "- trim: "
+            f"`on (start_frame={segment.start_frame}, "
+            f"end_frame={segment.end_frame}, "
+            f"segment_length={segment.segment_length}, "
+            f"frames_written={segment.frames_written})`"
+        )
+    return "- trim: `off (full video)`"
+
+
 def format_query_summary(
     *,
     result: dict[str, Any],
@@ -288,6 +315,7 @@ def format_query_summary(
     decision: str,
     output_path: Path,
     stitching_summary: dict[str, Any],
+    segment: RenderSegment | None = None,
 ) -> str:
     query_payload = result["query_payload"]
     warnings = result.get("warnings", [])
@@ -309,6 +337,7 @@ def format_query_summary(
         "",
         f"- output: `{output_path}`",
         f"- hold_frames: `{DEFAULT_HOLD_FRAMES}`",
+        format_segment_line(segment),
         "",
         "### Stitching",
         "",
@@ -403,6 +432,16 @@ def create_demo() -> gr.Blocks:
                     value=DEFAULT_STITCH_MAX_TRACKS,
                     precision=0,
                 )
+            with gr.Accordion("Output Trimming", open=True):
+                trim_segment_input = gr.Checkbox(
+                    label="Trim to person segment",
+                    value=DEFAULT_TRIM_SEGMENT,
+                )
+                trim_pad_frames_input = gr.Number(
+                    label="trim_pad_frames",
+                    value=DEFAULT_TRIM_PAD_FRAMES,
+                    precision=0,
+                )
             search_button = gr.Button(
                 "Search & Render",
                 variant="primary",
@@ -463,6 +502,8 @@ def create_demo() -> gr.Blocks:
                 stitch_min_margin_input,
                 stitch_max_overlap_input,
                 stitch_max_tracks_input,
+                trim_segment_input,
+                trim_pad_frames_input,
             ],
             outputs=[result_summary, output_video],
         )

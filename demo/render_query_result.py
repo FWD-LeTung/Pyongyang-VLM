@@ -16,7 +16,11 @@ from src.demo_pipeline.track_stitching import (
     merge_track_timelines,
     suggest_related_tracks,
 )
-from src.demo_pipeline.video_renderer import get_track_timeline, render_track_video
+from src.demo_pipeline.video_renderer import (
+    RenderSegment,
+    get_track_timeline,
+    render_track_video,
+)
 from src.matching_engine.schema import QueryUnderstandingPayload
 
 
@@ -52,6 +56,21 @@ def parse_args() -> argparse.Namespace:
         "--force-render",
         action="store_true",
         help="Render even when score or top1-top2 margin is below threshold.",
+    )
+    parser.add_argument(
+        "--trim",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Trim output to the person segment (first_seen..last_seen + padding). "
+            "Default: on. Use --no-trim to render the full video."
+        ),
+    )
+    parser.add_argument(
+        "--trim-pad-frames",
+        type=int,
+        default=30,
+        help="Padding frames on each side of the person segment when --trim is on.",
     )
     return parser.parse_args()
 
@@ -106,6 +125,7 @@ def main() -> int:
                     hold_frames=args.hold_frames,
                     saved=False,
                     stitching_summary=stitching_summary,
+                    segment=None,
                 )
                 print("Match confidence is low. Use --force-render to render anyway.")
                 return 0
@@ -136,13 +156,15 @@ def main() -> int:
             }
         else:
             timeline = get_track_timeline(data, int(best_track_id))
-        render_track_video(
+        segment = render_track_video(
             video_path=video_path,
             output_path=output_path,
             track_id=int(best_track_id),
             timeline=timeline,
             score=best_score,
             hold_frames=args.hold_frames,
+            trim_segment=args.trim,
+            trim_pad_frames=args.trim_pad_frames,
         )
         print_summary(
             result=result,
@@ -153,6 +175,7 @@ def main() -> int:
             hold_frames=args.hold_frames,
             saved=output_path.exists(),
             stitching_summary=stitching_summary,
+            segment=segment,
         )
         return 0
     except Exception as exc:
@@ -170,6 +193,7 @@ def print_summary(
     hold_frames: int,
     saved: bool,
     stitching_summary: dict[str, Any],
+    segment: RenderSegment | None = None,
 ) -> None:
     query_payload: QueryUnderstandingPayload = result["query_payload"]
 
@@ -191,6 +215,16 @@ def print_summary(
     print(f"output: {output_path}")
     print(f"hold_frames: {hold_frames}")
     print(f"saved: {saved}")
+    if segment is not None and segment.start_frame is not None:
+        print(
+            "trim: on "
+            f"(start_frame={segment.start_frame}, "
+            f"end_frame={segment.end_frame}, "
+            f"segment_length={segment.segment_length}, "
+            f"frames_written={segment.frames_written})"
+        )
+    else:
+        print("trim: off (full video)")
 
     print("\n=== Stitching ===")
     print(f"auto_stitch: {stitching_summary['auto_stitch']}")

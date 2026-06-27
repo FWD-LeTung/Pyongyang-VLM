@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import cv2
 
@@ -27,6 +27,48 @@ def get_track_timeline(data: dict[str, Any], track_id: int) -> dict[str, Any]:
     return timeline
 
 
+class RenderSegment(NamedTuple):
+    """Result of a render: output path plus optional trimmed-segment metadata.
+
+    ``start_frame``/``end_frame``/``segment_length`` are ``None`` when the full
+    video was rendered (``trim_segment=False``).
+    """
+
+    output_path: Path
+    start_frame: int | None
+    end_frame: int | None
+    segment_length: int | None
+    frames_written: int
+
+
+def compute_segment_bounds(
+    *,
+    frame_ids: list[int],
+    total_frame_count: int | None,
+    pad_frames: int = 0,
+) -> tuple[int, int]:
+    """Return clamped inclusive (start_frame, end_frame) for a trimmed render.
+
+    start = max(0, min(frame_ids) - pad_frames)
+    end   = min(total_frame_count - 1, max(frame_ids) + pad_frames)
+
+    When ``total_frame_count`` is ``None`` or non-positive (unknown), ``end``
+    is left unclamped and the read-loop EOF guard terminates the render.
+    """
+
+    if not frame_ids:
+        raise ValueError("frame_ids must contain at least one frame id.")
+
+    pad = max(0, int(pad_frames))
+    start = max(0, int(min(frame_ids)) - pad)
+    end = int(max(frame_ids)) + pad
+    if total_frame_count is not None and int(total_frame_count) > 0:
+        end = min(end, int(total_frame_count) - 1)
+    if end < start:
+        end = start
+    return start, end
+
+
 def render_track_video(
     *,
     video_path: str | Path,
@@ -35,8 +77,17 @@ def render_track_video(
     timeline: dict[str, Any],
     score: float,
     hold_frames: int = 15,
-) -> Path:
-    """Render one track timeline onto a copy of the input video."""
+    trim_segment: bool = False,
+    trim_pad_frames: int = 30,
+) -> RenderSegment:
+    """Render one track timeline onto a copy of the input video.
+
+    When ``trim_segment`` is True, only the segment spanning the track's first
+    to last seen frame (plus ``trim_pad_frames`` padding on each side, clamped to
+    the video bounds) is rendered, instead of the entire input video. Bounds are
+    derived from ``min/max(timeline["frame_ids"])`` so this works for both single
+    and stitched (merged) timelines. The bounding box is still drawn.
+    """
 
     resolved_video_path = Path(video_path)
     resolved_output_path = Path(output_path)
@@ -68,6 +119,18 @@ def render_track_video(
         cap.release()
         raise RuntimeError(f"Cannot read video dimensions from: {resolved_video_path}")
 
+    start_frame = 0
+    end_frame: int | None = None
+    if trim_segment:
+        raw_total = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        total_frame_count = int(raw_total) if raw_total and int(raw_total) > 0 else None
+        start_frame, end_frame = compute_segment_bounds(
+            frame_ids=[int(value) for value in frame_ids],
+            total_frame_count=total_frame_count,
+            pad_frames=trim_pad_frames,
+        )
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
     process = start_h264_writer(
         output_path=resolved_output_path,
         width=width,
@@ -75,7 +138,7 @@ def render_track_video(
         fps=fps,
     )
 
-    frame_index = 0
+    frame_index = start_frame
     frames_written = 0
     last_bbox: list[int] | None = None
     last_bbox_frame = -max(0, hold_frames) - 1
@@ -83,6 +146,8 @@ def render_track_video(
     finish_error: Exception | None = None
     try:
         while True:
+            if trim_segment and end_frame is not None and frame_index > end_frame:
+                break
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
@@ -120,7 +185,17 @@ def render_track_video(
         raise finish_error
     if frames_written == 0:
         raise RuntimeError(f"No frames were read from video: {resolved_video_path}")
-    return resolved_output_path
+
+    segment_length: int | None = None
+    if trim_segment and end_frame is not None:
+        segment_length = end_frame - start_frame + 1
+    return RenderSegment(
+        output_path=resolved_output_path,
+        start_frame=start_frame if trim_segment else None,
+        end_frame=end_frame if trim_segment else None,
+        segment_length=segment_length,
+        frames_written=frames_written,
+    )
 
 
 def start_h264_writer(

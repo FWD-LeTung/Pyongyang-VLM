@@ -1,0 +1,123 @@
+ <style>
+    /* 1. SETUP & CORE VARIABLES */
+    :root {
+      --primary: #00509d;
+      --primary-dark: #003f7d;
+      --secondary: #f4d35e;
+      --accent: #f95738;
+      --text-main: #1a1a1a;
+      --text-muted: #666;
+      --bg-light: #f8f9fa;
+      --white: #ffffff;
+      --border: #ececec;
+      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Inter", sans-serif;
+      background: #e2e8f0;
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 2. SLIDE CONTAINER */
+    .slide {
+      width: 1280px;
+      height: 720px;
+      background: var(--white);
+      display: none;
+      flex-direction: column;
+      position: relative;
+      padding: 60px 80px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+    }
+
+    .slide.active { display: flex; animation: slideIn 0.5s ease-out; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(15px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 3. TYPOGRAPHY */
+    .slide-title {
+      font-size: 56px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+      line-height: 1.1;
+    }
+
+    .blue { color: var(--primary); }
+    .section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .slide-subtitle {
+      font-size: 22px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      max-width: 850px;
+    }
+
+    /* 4. LAYOUT COMPONENTS */
+    .divider-slide {
+      background: var(--primary);
+      color: var(--white);
+      text-align: center;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .divider-slide h1 {
+      font-size: 100px;
+      letter-spacing: 15px;
+      font-weight: 900;
+    }
+
+    .content-area { flex: 1; margin-top: 20px; }
+
+    /* Grids */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+
+    /* Cards */
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 30px;
+      background: var(--bg-light);
+      transition: var(--transition);
+      height: 100%;
+    }
+    .card:hover { transform: translateY(-5px); border-color: var(--primary); }
+    .card h3 { font-size: 24px; margin-bottom: 15px; color: var(--primary); }
+    .card ul { list-style: none; }
+    .card li { margin-bottom: 10px; font-size: 17px; position: relative; padding-left: 20px; }
+    .card li::before { content: "•"; color: var(--primary); position: absolute; left: 0; font-weight: bold; }
+
+    /* Feature Items */
+    .feature-item {
+      font-size: 26px;
+      padding: 20px 25px;
+      border-left: 5px solid var(--primary);
+      background: #f0f7ff;
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+
